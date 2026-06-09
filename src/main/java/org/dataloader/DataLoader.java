@@ -197,6 +197,47 @@ public class DataLoader<K, V extends @Nullable Object> {
         return helper.getIfCompleted(key);
     }
 
+    /**
+     * This will return an optional promise to a value previously loaded via a {@link #load(Object, Object)} call
+     * with the specified key and key context, or empty if no call has been made for that key-context pair.
+     * <p>
+     * If you do get a present CompletableFuture it does not mean it has been dispatched and completed yet.
+     * It just means it's at least pending and in cache.
+     * <p>
+     * If caching is disabled there will never be a present Optional returned.
+     * <p>
+     * NOTE : This will NOT cause a data load to happen. You must call {@link #load(Object, Object)} for that to happen.
+     *
+     * @param key        the key to check
+     * @param keyContext the key context to check
+     *
+     * @return an Optional to the future of the value
+     */
+    public Optional<CompletableFuture<V>> getIfPresent(K key, Object keyContext) {
+        return helper.getIfPresent(key, keyContext);
+    }
+
+    /**
+     * This will return an optional promise to a value previously loaded via a {@link #load(Object, Object)} call
+     * with the specified key and key context that has in fact been completed, or empty if no call has been made
+     * for that key-context pair or the promise has not completed yet.
+     * <p>
+     * If you do get a present CompletableFuture it means it has been dispatched and completed. Completed is defined as
+     * {@link java.util.concurrent.CompletableFuture#isDone()} returning true.
+     * <p>
+     * If caching is disabled there will never be a present Optional returned.
+     * <p>
+     * NOTE : This will NOT cause a data load to happen. You must call {@link #load(Object, Object)} for that to happen.
+     *
+     * @param key        the key to check
+     * @param keyContext the key context to check
+     *
+     * @return an Optional to the future of the value
+     */
+    public Optional<CompletableFuture<V>> getIfCompleted(K key, Object keyContext) {
+        return helper.getIfCompleted(key, keyContext);
+    }
+
 
     private CompletableFuture<V> loadImpl(@NonNull K key, @Nullable Object keyContext) {
         return helper.load(nonNull(key), keyContext);
@@ -391,6 +432,33 @@ public class DataLoader<K, V extends @Nullable Object> {
     }
 
     /**
+     * Clears the future with the specified key and key context from the cache, if caching is enabled,
+     * so it will be re-fetched on the next load request.
+     *
+     * @param key        the key to remove
+     * @param keyContext the key context to remove
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> clear(K key, Object keyContext) {
+        return helper.clear(key, keyContext);
+    }
+
+    /**
+     * Clears the future with the specified key and key context from the cache remote value store,
+     * if caching is enabled and a remote store is set, so it will be re-fetched and stored on the next load request.
+     *
+     * @param key        the key to remove
+     * @param keyContext the key context to remove
+     * @param handler    a handler that will be called after the async remote clear completes
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> clear(K key, Object keyContext, BiConsumer<Void, Throwable> handler) {
+        return helper.clear(key, keyContext, handler);
+    }
+
+    /**
      * Clears the entire cache map of the loader.
      *
      * @return the data loader for fluent coding
@@ -453,6 +521,49 @@ public class DataLoader<K, V extends @Nullable Object> {
         Object cacheKey = getCacheKey(key);
         futureCache.putIfAbsentAtomically(cacheKey, value);
         return this;
+    }
+
+    /**
+     * Primes the cache with the given key, key context and value. Note this will only prime the future cache
+     * and not the value store. Use {@link ValueCache#set(Object, Object)} if you want
+     * to prime it with values before use
+     *
+     * @param key        the key
+     * @param keyContext the key context
+     * @param value      the value
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> prime(K key, Object keyContext, V value) {
+        return helper.prime(key, keyContext, value);
+    }
+
+    /**
+     * Primes the cache with the given key, key context and error.
+     *
+     * @param key        the key
+     * @param keyContext the key context
+     * @param error      the exception to prime instead of a value
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> prime(K key, Object keyContext, Exception error) {
+        return helper.prime(key, keyContext, error);
+    }
+
+    /**
+     * Primes the cache with the given key, key context and value. Note this will only prime the future cache
+     * and not the value store. Use {@link ValueCache#set(Object, Object)} if you want
+     * to prime it with values before use
+     *
+     * @param key        the key
+     * @param keyContext the key context
+     * @param value      the value
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> prime(K key, Object keyContext, CompletableFuture<V> value) {
+        return helper.prime(key, keyContext, value);
     }
 
     /**

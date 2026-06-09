@@ -142,6 +142,64 @@ class DataLoaderHelper<K, V> {
         return Optional.empty();
     }
 
+    Optional<CompletableFuture<V>> getIfPresent(K key, Object keyContext) {
+        boolean cachingEnabled = loaderOptions.cachingEnabled();
+        if (cachingEnabled) {
+            Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
+            try {
+                CompletableFuture<V> cacheValue = futureCache.get(cacheKey);
+                if (cacheValue != null) {
+                    stats.incrementCacheHitCount(new IncrementCacheHitCountStatisticsContext<>(key, keyContext));
+                    return Optional.of(cacheValue);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return Optional.empty();
+    }
+
+    Optional<CompletableFuture<V>> getIfCompleted(K key, Object keyContext) {
+        Optional<CompletableFuture<V>> cachedPromise = getIfPresent(key, keyContext);
+        if (cachedPromise.isPresent()) {
+            CompletableFuture<V> promise = cachedPromise.get();
+            if (promise.isDone()) {
+                return cachedPromise;
+            }
+        }
+        return Optional.empty();
+    }
+
+    DataLoader<K, V> clear(K key, Object keyContext) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
+        futureCache.delete(cacheKey);
+        return dataLoader;
+    }
+
+    DataLoader<K, V> clear(K key, Object keyContext, java.util.function.BiConsumer<Void, Throwable> handler) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
+        futureCache.delete(cacheKey);
+        valueCache.delete(key).whenComplete(handler);
+        return dataLoader;
+    }
+
+    DataLoader<K, V> prime(K key, Object keyContext, V value) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
+        futureCache.putIfAbsentAtomically(cacheKey, CompletableFuture.completedFuture(value));
+        return dataLoader;
+    }
+
+    DataLoader<K, V> prime(K key, Object keyContext, Exception error) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
+        futureCache.putIfAbsentAtomically(cacheKey, CompletableFutureKit.failedFuture(error));
+        return dataLoader;
+    }
+
+    DataLoader<K, V> prime(K key, Object keyContext, CompletableFuture<V> value) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
+        futureCache.putIfAbsentAtomically(cacheKey, value);
+        return dataLoader;
+    }
+
 
     CompletableFuture<V> load(K key, Object loadContext) {
         boolean batchingEnabled = loaderOptions.batchingEnabled();
@@ -218,7 +276,7 @@ class DataLoaderHelper<K, V> {
     @SuppressWarnings("unchecked")
     Object getCacheKeyWithContext(K key, Object context) {
         return loaderOptions.cacheKeyFunction().isPresent() ?
-                loaderOptions.cacheKeyFunction().get().getKeyWithContext(key, context) : key;
+                loaderOptions.cacheKeyFunction().get().getKeyWithContext(key, context) : new CacheKeyWithContext<>(key, context);
     }
 
     @SuppressWarnings("unchecked")
