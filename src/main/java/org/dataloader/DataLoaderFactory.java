@@ -12,6 +12,20 @@ import static org.dataloader.impl.Assertions.nonNull;
 @PublicApi
 public class DataLoaderFactory {
 
+    private static <K, V> DataLoader<K, V> createDataLoader(@Nullable String name, Object batchLoadFunction, @Nullable DataLoaderOptions options) {
+        return new DataLoader<>(name, batchLoadFunction, options);
+    }
+
+    private static <K, V> DataLoader<K, V> unnamed(Object batchLoadFunction, @Nullable DataLoaderOptions options) {
+        return createDataLoader(null, batchLoadFunction, options);
+    }
+
+    private static <K, V> DataLoader<K, V> named(String name, Object batchLoadFunction, @Nullable DataLoaderOptions options) {
+        return createDataLoader(nonNull(name), batchLoadFunction, options);
+    }
+
+    // ---- BatchLoader ----
+
     /**
      * Creates new DataLoader with the specified batch loader function and default options
      * (batching, caching and unlimited batch size).
@@ -22,7 +36,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(BatchLoader<K, V> batchLoadFunction) {
-        return newDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -36,7 +50,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(String name, BatchLoader<K, V> batchLoadFunction) {
-        return newDataLoader(name, batchLoadFunction, null);
+        return named(name, batchLoadFunction, null);
     }
 
     /**
@@ -49,7 +63,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(BatchLoader<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -63,8 +77,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(String name, BatchLoader<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchLoader WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -83,7 +99,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoaderWithTry(BatchLoader<K, Try<V>> batchLoadFunction) {
-        return newDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -99,7 +115,7 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newDataLoaderWithTry(BatchLoader<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -116,8 +132,10 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newDataLoaderWithTry(String name, BatchLoader<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchLoaderWithContext ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -129,7 +147,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(BatchLoaderWithContext<K, V> batchLoadFunction) {
-        return newDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -142,7 +160,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(BatchLoaderWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -156,8 +174,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoader(String name, BatchLoaderWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchLoaderWithContext WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -176,7 +196,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newDataLoaderWithTry(BatchLoaderWithContext<K, Try<V>> batchLoadFunction) {
-        return newDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -192,7 +212,7 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newDataLoaderWithTry(BatchLoaderWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -209,8 +229,10 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newDataLoaderWithTry(String name, BatchLoaderWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchLoader ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -222,7 +244,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoader(MappedBatchLoader<K, V> batchLoadFunction) {
-        return newMappedDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -235,7 +257,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoader(MappedBatchLoader<K, V> batchLoadFunction, @Nullable DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -248,8 +270,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoader(String name, MappedBatchLoader<K, V> batchLoadFunction, @Nullable DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchLoader WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -269,7 +293,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoaderWithTry(MappedBatchLoader<K, Try<V>> batchLoadFunction) {
-        return newMappedDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -285,7 +309,7 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoaderWithTry(MappedBatchLoader<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -302,8 +326,10 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoaderWithTry(String name, MappedBatchLoader<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchLoaderWithContext ----
 
     /**
      * Creates new DataLoader with the specified mapped batch loader function and default options
@@ -315,7 +341,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoader(MappedBatchLoaderWithContext<K, V> batchLoadFunction) {
-        return newMappedDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -328,7 +354,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoader(MappedBatchLoaderWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -342,8 +368,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoader(String name, MappedBatchLoaderWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchLoaderWithContext WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -362,7 +390,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoaderWithTry(MappedBatchLoaderWithContext<K, Try<V>> batchLoadFunction) {
-        return newMappedDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -378,7 +406,7 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoaderWithTry(MappedBatchLoaderWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -395,8 +423,10 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newMappedDataLoaderWithTry(String name, MappedBatchLoaderWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchPublisher ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -408,7 +438,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoader(BatchPublisher<K, V> batchLoadFunction) {
-        return newPublisherDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -421,7 +451,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoader(BatchPublisher<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -435,8 +465,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoader(String name, BatchPublisher<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchPublisher WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -455,7 +487,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoaderWithTry(BatchPublisher<K, Try<V>> batchLoadFunction) {
-        return newPublisherDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -471,7 +503,7 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoaderWithTry(BatchPublisher<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -488,8 +520,10 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoaderWithTry(String name, BatchPublisher<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchPublisherWithContext ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -501,7 +535,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoader(BatchPublisherWithContext<K, V> batchLoadFunction) {
-        return newPublisherDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -514,7 +548,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoader(BatchPublisherWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -528,8 +562,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoader(String name, BatchPublisherWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- BatchPublisherWithContext WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -548,7 +584,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoaderWithTry(BatchPublisherWithContext<K, Try<V>> batchLoadFunction) {
-        return newPublisherDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -564,7 +600,7 @@ public class DataLoaderFactory {
      * @see #newPublisherDataLoaderWithTry(BatchPublisher)
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoaderWithTry(BatchPublisherWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -581,8 +617,10 @@ public class DataLoaderFactory {
      * @see #newPublisherDataLoaderWithTry(BatchPublisher)
      */
     public static <K, V> DataLoader<K, V> newPublisherDataLoaderWithTry(String name, BatchPublisherWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchPublisher ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -594,7 +632,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoader(MappedBatchPublisher<K, V> batchLoadFunction) {
-        return newMappedPublisherDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -607,7 +645,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoader(MappedBatchPublisher<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -621,8 +659,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoader(String name, MappedBatchPublisher<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchPublisher WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -641,7 +681,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoaderWithTry(MappedBatchPublisher<K, Try<V>> batchLoadFunction) {
-        return newMappedPublisherDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -657,7 +697,7 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoaderWithTry(MappedBatchPublisher<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -674,8 +714,10 @@ public class DataLoaderFactory {
      * @see #newDataLoaderWithTry(BatchLoader)
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoaderWithTry(String name, MappedBatchPublisher<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchPublisherWithContext ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -687,7 +729,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoader(MappedBatchPublisherWithContext<K, V> batchLoadFunction) {
-        return newMappedPublisherDataLoader(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -700,7 +742,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoader(MappedBatchPublisherWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -714,8 +756,10 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoader(String name, MappedBatchPublisherWithContext<K, V> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
+
+    // ---- MappedBatchPublisherWithContext WithTry ----
 
     /**
      * Creates new DataLoader with the specified batch loader function and default options
@@ -734,7 +778,7 @@ public class DataLoaderFactory {
      * @return a new DataLoader
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoaderWithTry(MappedBatchPublisherWithContext<K, Try<V>> batchLoadFunction) {
-        return newMappedPublisherDataLoaderWithTry(batchLoadFunction, null);
+        return unnamed(batchLoadFunction, null);
     }
 
     /**
@@ -750,7 +794,7 @@ public class DataLoaderFactory {
      * @see #newMappedPublisherDataLoaderWithTry(MappedBatchPublisher)
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoaderWithTry(MappedBatchPublisherWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(null, batchLoadFunction, options);
+        return unnamed(batchLoadFunction, options);
     }
 
     /**
@@ -767,12 +811,10 @@ public class DataLoaderFactory {
      * @see #newMappedPublisherDataLoaderWithTry(MappedBatchPublisher)
      */
     public static <K, V> DataLoader<K, V> newMappedPublisherDataLoaderWithTry(String name, MappedBatchPublisherWithContext<K, Try<V>> batchLoadFunction, DataLoaderOptions options) {
-        return mkDataLoader(nonNull(name), batchLoadFunction, options);
+        return named(name, batchLoadFunction, options);
     }
 
-    static <K, V> DataLoader<K, V> mkDataLoader(@Nullable String name, Object batchLoadFunction, @Nullable DataLoaderOptions options) {
-        return new DataLoader<>(name, batchLoadFunction, options);
-    }
+    // ---- Builder ----
 
     /**
      * Return a new {@link Builder} of a data loader.
@@ -873,8 +915,7 @@ public class DataLoaderFactory {
         }
 
         public DataLoader<K, V> build() {
-            return mkDataLoader(name, batchLoadFunction, options);
+            return createDataLoader(name, batchLoadFunction, options);
         }
     }
 }
-
