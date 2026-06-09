@@ -275,17 +275,35 @@ public class DataLoaderRegistry {
     }
 
     /**
+     * @return A map of data loader keys to the number of dispatches
+     */
+    public Map<String, Integer> dispatchAllWithCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        getDataLoadersMap().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> counts.put(entry.getKey(), entry.getValue().dispatchWithCounts().getKeysCount()));
+        return counts;
+    }
+
+    /**
      * Similar to {@link DataLoaderRegistry#dispatchAll()}, this calls {@link org.dataloader.DataLoader#dispatch()} on
      * each of the registered {@link org.dataloader.DataLoader}s, but returns the number of dispatches.
      *
      * @return total number of entries that were dispatched from registered {@link org.dataloader.DataLoader}s.
      */
     public int dispatchAllWithCount() {
-        int sum = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            sum += dataLoader.dispatchWithCounts().getKeysCount();
-        }
-        return sum;
+        return dispatchAllWithCounts().values().stream().mapToInt(Integer::intValue).sum();
+    }
+
+    /**
+     * @return A map of data loader keys to their current dispatch depths
+     */
+    public Map<String, Integer> dispatchDepths() {
+        Map<String, Integer> depths = new LinkedHashMap<>();
+        getDataLoadersMap().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> depths.put(entry.getKey(), entry.getValue().dispatchDepth()));
+        return depths;
     }
 
     /**
@@ -293,11 +311,7 @@ public class DataLoaderRegistry {
      * {@link org.dataloader.DataLoader}s
      */
     public int dispatchDepth() {
-        int totalDispatchDepth = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            totalDispatchDepth += dataLoader.dispatchDepth();
-        }
-        return totalDispatchDepth;
+        return dispatchDepths().values().stream().mapToInt(Integer::intValue).sum();
     }
 
     /**

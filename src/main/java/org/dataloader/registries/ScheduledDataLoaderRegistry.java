@@ -177,14 +177,16 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     }
 
     @Override
-    public int dispatchAllWithCount() {
-        int sum = 0;
-        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
-            DataLoader<?, ?> dataLoader = entry.getValue();
-            String key = entry.getKey();
-            sum += dispatchOrReschedule(key, dataLoader);
-        }
-        return sum;
+    public Map<String, Integer> dispatchAllWithCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        getDataLoadersMap().entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> {
+                    String key = entry.getKey();
+                    DataLoader<?, ?> dataLoader = entry.getValue();
+                    counts.put(key, dispatchOrReschedule(key, dataLoader));
+                });
+        return counts;
     }
 
 
