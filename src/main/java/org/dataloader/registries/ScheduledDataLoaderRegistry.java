@@ -13,7 +13,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.dataloader.impl.Assertions.nonNull;
@@ -60,7 +62,23 @@ import static org.dataloader.impl.Assertions.nonNull;
 @NullMarked
 public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements AutoCloseable {
 
+    private static final class PendingDispatch {
+        private volatile @Nullable ScheduledFuture<?> future;
+
+        private boolean isPending() {
+            return future == null || (!future.isDone() && !future.isCancelled());
+        }
+
+        private void cancel() {
+            ScheduledFuture<?> currentFuture = future;
+            if (currentFuture != null) {
+                currentFuture.cancel(false);
+            }
+        }
+    }
+
     private final Map<DataLoader<?, ?>, DispatchPredicate> dataLoaderPredicates = new ConcurrentHashMap<>();
+    private final Map<String, PendingDispatch> pendingDispatches = new ConcurrentHashMap<>();
     private final DispatchPredicate dispatchPredicate;
     private final ScheduledExecutorService scheduledExecutorService;
     private final boolean defaultExecutorUsed;
@@ -85,6 +103,7 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     @Override
     public void close() {
         closed = true;
+        cancelPendingDispatches();
         if (defaultExecutorUsed) {
             scheduledExecutorService.shutdown();
         }
@@ -120,7 +139,12 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      */
     public ScheduledDataLoaderRegistry combine(DataLoaderRegistry registry) {
         Builder combinedBuilder = ScheduledDataLoaderRegistry.newScheduledRegistry()
-                .dispatchPredicate(this.dispatchPredicate);
+                .dispatchPredicate(this.dispatchPredicate)
+                .schedule(this.schedule)
+                .tickerMode(this.tickerMode);
+        if (!defaultExecutorUsed) {
+            combinedBuilder.scheduledExecutorService(this.scheduledExecutorService);
+        }
         combinedBuilder.registerAll(this);
         combinedBuilder.registerAll(registry);
         return combinedBuilder.build();
@@ -134,6 +158,7 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      * @return this registry
      */
     public ScheduledDataLoaderRegistry unregister(String key) {
+        cancelPendingDispatch(key);
         DataLoader<?, ?> dataLoader = dataLoaders.remove(key);
         if (dataLoader != null) {
             dataLoaderPredicates.remove(dataLoader);
@@ -157,6 +182,17 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
         return dispatchPredicate;
     }
 
+    @Override
+    public ScheduledDataLoaderRegistry register(String key, DataLoader<?, ?> dataLoader) {
+        cancelPendingDispatch(key);
+        DataLoader<?, ?> previous = dataLoaders.get(key);
+        if (previous != null) {
+            dataLoaderPredicates.remove(previous);
+        }
+        super.register(key, dataLoader);
+        return this;
+    }
+
     /**
      * This will register a new dataloader and dispatch predicate associated with that data loader
      *
@@ -166,8 +202,11 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      * @return this registry
      */
     public ScheduledDataLoaderRegistry register(String key, DataLoader<?, ?> dataLoader, DispatchPredicate dispatchPredicate) {
-        dataLoaders.put(key, dataLoader);
-        dataLoaderPredicates.put(dataLoader, dispatchPredicate);
+        register(key, dataLoader);
+        DataLoader<?, ?> registeredDataLoader = dataLoaders.get(key);
+        if (registeredDataLoader != null) {
+            dataLoaderPredicates.put(registeredDataLoader, dispatchPredicate);
+        }
         return this;
     }
 
@@ -234,10 +273,54 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     }
 
     private void reschedule(String key, DataLoader<?, ?> dataLoader) {
-        if (!closed) {
-            Runnable runThis = () -> dispatchOrReschedule(key, dataLoader);
-            scheduledExecutorService.schedule(runThis, schedule.toMillis(), TimeUnit.MILLISECONDS);
+        if (closed || !isCurrentRegistration(key, dataLoader)) {
+            return;
         }
+        while (!closed && isCurrentRegistration(key, dataLoader)) {
+            PendingDispatch pendingDispatch = new PendingDispatch();
+            PendingDispatch existing = pendingDispatches.putIfAbsent(key, pendingDispatch);
+            if (existing != null) {
+                if (existing.isPending()) {
+                    return;
+                }
+                if (!pendingDispatches.replace(key, existing, pendingDispatch)) {
+                    continue;
+                }
+            }
+            try {
+                pendingDispatch.future = scheduledExecutorService.schedule(
+                        () -> runPendingDispatch(key, dataLoader, pendingDispatch),
+                        schedule.toMillis(),
+                        TimeUnit.MILLISECONDS
+                );
+            } catch (RejectedExecutionException ignored) {
+                pendingDispatches.remove(key, pendingDispatch);
+            }
+            return;
+        }
+    }
+
+    private void runPendingDispatch(String key, DataLoader<?, ?> dataLoader, PendingDispatch pendingDispatch) {
+        pendingDispatches.remove(key, pendingDispatch);
+        if (!closed && isCurrentRegistration(key, dataLoader)) {
+            dispatchOrReschedule(key, dataLoader);
+        }
+    }
+
+    private boolean isCurrentRegistration(String key, DataLoader<?, ?> dataLoader) {
+        return dataLoader == dataLoaders.get(key);
+    }
+
+    private void cancelPendingDispatch(String key) {
+        PendingDispatch pendingDispatch = pendingDispatches.remove(key);
+        if (pendingDispatch != null) {
+            pendingDispatch.cancel();
+        }
+    }
+
+    private void cancelPendingDispatches() {
+        pendingDispatches.values().forEach(PendingDispatch::cancel);
+        pendingDispatches.clear();
     }
 
     private int dispatchOrReschedule(String key, DataLoader<?, ?> dataLoader) {
