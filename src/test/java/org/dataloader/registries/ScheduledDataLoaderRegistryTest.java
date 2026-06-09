@@ -279,10 +279,10 @@ public class ScheduledDataLoaderRegistryTest {
 
         registry.dispatchAll();
         snooze(200);
-        assertEquals(counter.get(), countThen + 1); // will have re-entered
+        assertEquals(counter.get(), countThen);
 
         snooze(200);
-        assertEquals(counter.get(), countThen + 1);
+        assertEquals(counter.get(), countThen);
     }
 
     @ParameterizedTest
