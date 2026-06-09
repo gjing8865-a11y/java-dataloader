@@ -187,6 +187,18 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
         return sum;
     }
 
+    @Override
+    public Map<String, Integer> dispatchAllWithCounts() {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+            DataLoader<?, ?> dataLoader = entry.getValue();
+            String key = entry.getKey();
+            int count = dispatchOrReschedule(key, dataLoader);
+            result.put(key, count);
+        }
+        return result;
+    }
+
 
     /**
      * This will immediately dispatch the {@link DataLoader}s in the registry

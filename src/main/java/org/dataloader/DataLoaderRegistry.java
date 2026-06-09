@@ -276,16 +276,43 @@ public class DataLoaderRegistry {
 
     /**
      * Similar to {@link DataLoaderRegistry#dispatchAll()}, this calls {@link org.dataloader.DataLoader#dispatch()} on
+     * each of the registered {@link org.dataloader.DataLoader}s, but returns a map of the number of dispatches
+     * per registry key.
+     *
+     * @return map of registry key to the number of entries that were dispatched from that {@link org.dataloader.DataLoader}.
+     */
+    public Map<String, Integer> dispatchAllWithCounts() {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+            result.put(entry.getKey(), entry.getValue().dispatchWithCounts().getKeysCount());
+        }
+        return result;
+    }
+
+    /**
+     * Similar to {@link DataLoaderRegistry#dispatchAll()}, this calls {@link org.dataloader.DataLoader#dispatch()} on
      * each of the registered {@link org.dataloader.DataLoader}s, but returns the number of dispatches.
      *
      * @return total number of entries that were dispatched from registered {@link org.dataloader.DataLoader}s.
      */
     public int dispatchAllWithCount() {
         int sum = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            sum += dataLoader.dispatchWithCounts().getKeysCount();
+        for (Integer count : dispatchAllWithCounts().values()) {
+            sum += count;
         }
         return sum;
+    }
+
+    /**
+     * @return a map of registry key to the depth of batched key loads that need to be dispatched
+     * from each registered {@link org.dataloader.DataLoader}.
+     */
+    public Map<String, Integer> dispatchDepths() {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+            result.put(entry.getKey(), entry.getValue().dispatchDepth());
+        }
+        return result;
     }
 
     /**
@@ -294,8 +321,8 @@ public class DataLoaderRegistry {
      */
     public int dispatchDepth() {
         int totalDispatchDepth = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            totalDispatchDepth += dataLoader.dispatchDepth();
+        for (Integer depth : dispatchDepths().values()) {
+            totalDispatchDepth += depth;
         }
         return totalDispatchDepth;
     }

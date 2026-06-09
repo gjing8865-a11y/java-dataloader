@@ -1,0 +1,86 @@
+diff --git a/src/main/java/org/dataloader/DataLoaderRegistry.java b/src/main/java/org/dataloader/DataLoaderRegistry.java
+index 6bc79f6..1b1be6b 100644
+--- a/src/main/java/org/dataloader/DataLoaderRegistry.java
++++ b/src/main/java/org/dataloader/DataLoaderRegistry.java
+@@ -274,6 +274,21 @@ public class DataLoaderRegistry {
+         getDataLoaders().forEach(DataLoader::dispatch);
+     }
+ 
++    /**
++     * Similar to {@link DataLoaderRegistry#dispatchAll()}, this calls {@link org.dataloader.DataLoader#dispatch()} on
++     * each of the registered {@link org.dataloader.DataLoader}s, but returns a map of the number of dispatches
++     * per registry key.
++     *
++     * @return map of registry key to the number of entries that were dispatched from that {@link org.dataloader.DataLoader}.
++     */
++    public Map<String, Integer> dispatchAllWithCounts() {
++        Map<String, Integer> result = new LinkedHashMap<>();
++        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
++            result.put(entry.getKey(), entry.getValue().dispatchWithCounts().getKeysCount());
++        }
++        return result;
++    }
++
+     /**
+      * Similar to {@link DataLoaderRegistry#dispatchAll()}, this calls {@link org.dataloader.DataLoader#dispatch()} on
+      * each of the registered {@link org.dataloader.DataLoader}s, but returns the number of dispatches.
+@@ -282,20 +297,32 @@ public class DataLoaderRegistry {
+      */
+     public int dispatchAllWithCount() {
+         int sum = 0;
+-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
+-            sum += dataLoader.dispatchWithCounts().getKeysCount();
++        for (Integer count : dispatchAllWithCounts().values()) {
++            sum += count;
+         }
+         return sum;
+     }
+ 
++    /**
++     * @return a map of registry key to the depth of batched key loads that need to be dispatched
++     * from each registered {@link org.dataloader.DataLoader}.
++     */
++    public Map<String, Integer> dispatchDepths() {
++        Map<String, Integer> result = new LinkedHashMap<>();
++        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
++            result.put(entry.getKey(), entry.getValue().dispatchDepth());
++        }
++        return result;
++    }
++
+     /**
+      * @return The sum of all batched key loads that need to be dispatched from all registered
+      * {@link org.dataloader.DataLoader}s
+      */
+     public int dispatchDepth() {
+         int totalDispatchDepth = 0;
+-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
+-            totalDispatchDepth += dataLoader.dispatchDepth();
++        for (Integer depth : dispatchDepths().values()) {
++            totalDispatchDepth += depth;
+         }
+         return totalDispatchDepth;
+     }
+diff --git a/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java b/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
+index 4f62378..036e77f 100644
+--- a/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
++++ b/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
+@@ -187,6 +187,18 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
+         return sum;
+     }
+ 
++    @Override
++    public Map<String, Integer> dispatchAllWithCounts() {
++        Map<String, Integer> result = new LinkedHashMap<>();
++        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
++            DataLoader<?, ?> dataLoader = entry.getValue();
++            String key = entry.getKey();
++            int count = dispatchOrReschedule(key, dataLoader);
++            result.put(key, count);
++        }
++        return result;
++    }
++
+ 
+     /**
+      * This will immediately dispatch the {@link DataLoader}s in the registry
