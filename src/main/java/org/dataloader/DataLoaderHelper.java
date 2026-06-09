@@ -142,6 +142,33 @@ class DataLoaderHelper<K, V> {
         return Optional.empty();
     }
 
+    Optional<CompletableFuture<V>> getIfPresent(K key, @Nullable Object keyContext) {
+        boolean cachingEnabled = loaderOptions.cachingEnabled();
+        if (cachingEnabled) {
+            Object cacheKey = keyContext == null ? getCacheKey(nonNull(key)) : getCacheKeyWithContext(nonNull(key), keyContext);
+            try {
+                CompletableFuture<V> cacheValue = futureCache.get(cacheKey);
+                if (cacheValue != null) {
+                    stats.incrementCacheHitCount(new IncrementCacheHitCountStatisticsContext<>(key, keyContext));
+                    return Optional.of(cacheValue);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return Optional.empty();
+    }
+
+    Optional<CompletableFuture<V>> getIfCompleted(K key, @Nullable Object keyContext) {
+        Optional<CompletableFuture<V>> cachedPromise = getIfPresent(key, keyContext);
+        if (cachedPromise.isPresent()) {
+            CompletableFuture<V> promise = cachedPromise.get();
+            if (promise.isDone()) {
+                return cachedPromise;
+            }
+        }
+        return Optional.empty();
+    }
+
 
     CompletableFuture<V> load(K key, Object loadContext) {
         boolean batchingEnabled = loaderOptions.batchingEnabled();

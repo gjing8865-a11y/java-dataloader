@@ -1,0 +1,179 @@
+diff --git a/src/main/java/org/dataloader/DataLoader.java b/src/main/java/org/dataloader/DataLoader.java
+index 125efe1..87ebda5 100644
+--- a/src/main/java/org/dataloader/DataLoader.java
++++ b/src/main/java/org/dataloader/DataLoader.java
+@@ -197,6 +197,41 @@ public class DataLoader<K, V extends @Nullable Object> {
+         return helper.getIfCompleted(key);
+     }
+ 
++    /**
++     * This will return an optional promise to a value previously loaded via a {@link #load(Object, Object)} call with
++     * the given key and context, or empty if no call has been made for that (key, context) pair.
++     * <p>
++     * If caching is disabled there will never be a present Optional returned.
++     * <p>
++     * NOTE : This will NOT cause a data load to happen. You must call {@link #load(Object, Object)} for that to happen.
++     *
++     * @param key        the key to check
++     * @param keyContext the key context to check
++     *
++     * @return an Optional to the future of the value
++     */
++    public Optional<CompletableFuture<V>> getIfPresent(K key, @Nullable Object keyContext) {
++        return helper.getIfPresent(key, keyContext);
++    }
++
++    /**
++     * This will return an optional promise to a value previously loaded via a {@link #load(Object, Object)} call
++     * with the given key and context that has in fact been completed, or empty if no matching completed promise
++     * exists.
++     * <p>
++     * If caching is disabled there will never be a present Optional returned.
++     * <p>
++     * NOTE : This will NOT cause a data load to happen.  You must call {@link #load(Object, Object)} for that to happen.
++     *
++     * @param key        the key to check
++     * @param keyContext the key context to check
++     *
++     * @return an Optional to the future of the value
++     */
++    public Optional<CompletableFuture<V>> getIfCompleted(K key, @Nullable Object keyContext) {
++        return helper.getIfCompleted(key, keyContext);
++    }
++
+ 
+     private CompletableFuture<V> loadImpl(@NonNull K key, @Nullable Object keyContext) {
+         return helper.load(nonNull(key), keyContext);
+@@ -390,6 +425,39 @@ public class DataLoader<K, V extends @Nullable Object> {
+         return this;
+     }
+ 
++    /**
++     * Clears the future with the specified key and context from the cache, if caching is enabled.
++     * <p>
++     * Note that this only affects the future cache, not the value cache.
++     *
++     * @param key        the key to remove
++     * @param keyContext the key context to remove
++     *
++     * @return the data loader for fluent coding
++     */
++    public DataLoader<K, V> clear(K key, @Nullable Object keyContext) {
++        return clear(key, keyContext, (v, e) -> {
++        });
++    }
++
++    /**
++     * Clears the future with the specified key and context from the cache, if caching is enabled.
++     * <p>
++     * Note that this only affects the future cache, not the value cache.
++     *
++     * @param key        the key to remove
++     * @param keyContext the key context to remove
++     * @param handler    a handler that will be called after the async remote clear completes
++     *
++     * @return the data loader for fluent coding
++     */
++    public DataLoader<K, V> clear(K key, @Nullable Object keyContext, BiConsumer<Void, Throwable> handler) {
++        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
++        futureCache.delete(cacheKey);
++        valueCache.delete(key).whenComplete(handler);
++        return this;
++    }
++
+     /**
+      * Clears the entire cache map of the loader.
+      *
+@@ -455,6 +523,54 @@ public class DataLoader<K, V extends @Nullable Object> {
+         return this;
+     }
+ 
++    /**
++     * Primes the cache with the given key, context, and value. Note this will only prime the future cache
++     * and not the value store.
++     *
++     * @param key        the key
++     * @param keyContext the key context
++     * @param value      the value
++     *
++     * @return the data loader for fluent coding
++     */
++    public DataLoader<K, V> prime(K key, @Nullable Object keyContext, V value) {
++        return prime(key, keyContext, CompletableFuture.completedFuture(value));
++    }
++
++    /**
++     * Primes the cache with the given key, context, and error.
++     *
++     * @param key        the key
++     * @param keyContext the key context
++     * @param error      the exception to prime instead of a value
++     *
++     * @return the data loader for fluent coding
++     */
++    public DataLoader<K, V> prime(K key, @Nullable Object keyContext, Exception error) {
++        return prime(key, keyContext, CompletableFutureKit.failedFuture(error));
++    }
++
++    /**
++     * Primes the cache with the given key, context, and future value. Note this will only prime the future cache
++     * and not the value store.
++     *
++     * @param key        the key
++     * @param keyContext the key context
++     * @param value      the future value
++     *
++     * @return the data loader for fluent coding
++     */
++    public DataLoader<K, V> prime(K key, @Nullable Object keyContext, CompletableFuture<V> value) {
++        Object cacheKey = keyContext == null ? getCacheKey(key) : getCacheKeyWithContext(key, keyContext);
++        futureCache.putIfAbsentAtomically(cacheKey, value);
++        return this;
++    }
++
++    @SuppressWarnings("unchecked")
++    private Object getCacheKeyWithContext(K key, Object context) {
++        return helper.getCacheKeyWithContext(key, context);
++    }
++
+     /**
+      * Gets the object that is used in the internal cache map as key, by applying the cache key function to
+      * the provided key.
+diff --git a/src/main/java/org/dataloader/DataLoaderHelper.java b/src/main/java/org/dataloader/DataLoaderHelper.java
+index feb6184..4e39c64 100644
+--- a/src/main/java/org/dataloader/DataLoaderHelper.java
++++ b/src/main/java/org/dataloader/DataLoaderHelper.java
+@@ -142,6 +142,33 @@ class DataLoaderHelper<K, V> {
+         return Optional.empty();
+     }
+ 
++    Optional<CompletableFuture<V>> getIfPresent(K key, @Nullable Object keyContext) {
++        boolean cachingEnabled = loaderOptions.cachingEnabled();
++        if (cachingEnabled) {
++            Object cacheKey = keyContext == null ? getCacheKey(nonNull(key)) : getCacheKeyWithContext(nonNull(key), keyContext);
++            try {
++                CompletableFuture<V> cacheValue = futureCache.get(cacheKey);
++                if (cacheValue != null) {
++                    stats.incrementCacheHitCount(new IncrementCacheHitCountStatisticsContext<>(key, keyContext));
++                    return Optional.of(cacheValue);
++                }
++            } catch (Exception ignored) {
++            }
++        }
++        return Optional.empty();
++    }
++
++    Optional<CompletableFuture<V>> getIfCompleted(K key, @Nullable Object keyContext) {
++        Optional<CompletableFuture<V>> cachedPromise = getIfPresent(key, keyContext);
++        if (cachedPromise.isPresent()) {
++            CompletableFuture<V> promise = cachedPromise.get();
++            if (promise.isDone()) {
++                return cachedPromise;
++            }
++        }
++        return Optional.empty();
++    }
++
+ 
+     CompletableFuture<V> load(K key, Object loadContext) {
+         boolean batchingEnabled = loaderOptions.batchingEnabled();
