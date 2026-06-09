@@ -179,12 +179,37 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     @Override
     public int dispatchAllWithCount() {
         int sum = 0;
+        for (Integer count : dispatchAllWithCounts().values()) {
+            sum += count;
+        }
+        return sum;
+    }
+
+    @Override
+    public Map<String, Integer> dispatchAllWithCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
         for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
             DataLoader<?, ?> dataLoader = entry.getValue();
             String key = entry.getKey();
-            sum += dispatchOrReschedule(key, dataLoader);
+            counts.put(key, dispatchOrRescheduleWithCount(key, dataLoader));
         }
-        return sum;
+        return counts;
+    }
+
+    @Override
+    public Map<String, Integer> dispatchDepths() {
+        Map<String, Integer> depths = new LinkedHashMap<>();
+        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+            DataLoader<?, ?> dataLoader = entry.getValue();
+            String key = entry.getKey();
+            if (shouldDispatch(key, dataLoader)) {
+                depths.put(key, dataLoader.dispatchDepth());
+            } else {
+                depths.put(key, 0);
+                reschedule(key, dataLoader);
+            }
+        }
+        return depths;
     }
 
 
@@ -250,6 +275,18 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
             reschedule(key, dataLoader);
         }
         return sum;
+    }
+
+    private int dispatchOrRescheduleWithCount(String key, DataLoader<?, ?> dataLoader) {
+        boolean shouldDispatch = shouldDispatch(key, dataLoader);
+        int count = 0;
+        if (shouldDispatch) {
+            count = dataLoader.dispatchWithCounts().getKeysCount();
+        }
+        if (tickerMode || !shouldDispatch) {
+            reschedule(key, dataLoader);
+        }
+        return count;
     }
 
     /**

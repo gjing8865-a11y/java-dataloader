@@ -275,6 +275,20 @@ public class DataLoaderRegistry {
     }
 
     /**
+     * Returns a map of each registered data loader key to the number of keys dispatched.
+     * The map preserves the registration order of keys.
+     *
+     * @return a map of data loader keys to their dispatched key counts
+     */
+    public Map<String, Integer> dispatchAllWithCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+            counts.put(entry.getKey(), entry.getValue().dispatchWithCounts().getKeysCount());
+        }
+        return counts;
+    }
+
+    /**
      * Similar to {@link DataLoaderRegistry#dispatchAll()}, this calls {@link org.dataloader.DataLoader#dispatch()} on
      * each of the registered {@link org.dataloader.DataLoader}s, but returns the number of dispatches.
      *
@@ -282,10 +296,24 @@ public class DataLoaderRegistry {
      */
     public int dispatchAllWithCount() {
         int sum = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            sum += dataLoader.dispatchWithCounts().getKeysCount();
+        for (Integer count : dispatchAllWithCounts().values()) {
+            sum += count;
         }
         return sum;
+    }
+
+    /**
+     * Returns a map of each registered data loader key to its dispatch depth.
+     * The map preserves the registration order of keys.
+     *
+     * @return a map of data loader keys to their dispatch depths
+     */
+    public Map<String, Integer> dispatchDepths() {
+        Map<String, Integer> depths = new LinkedHashMap<>();
+        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+            depths.put(entry.getKey(), entry.getValue().dispatchDepth());
+        }
+        return depths;
     }
 
     /**
@@ -294,8 +322,8 @@ public class DataLoaderRegistry {
      */
     public int dispatchDepth() {
         int totalDispatchDepth = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            totalDispatchDepth += dataLoader.dispatchDepth();
+        for (Integer depth : dispatchDepths().values()) {
+            totalDispatchDepth += depth;
         }
         return totalDispatchDepth;
     }
