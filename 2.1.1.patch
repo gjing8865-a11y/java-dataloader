@@ -1,0 +1,222 @@
+diff --git a/src/main/java/org/dataloader/DataLoader.java b/src/main/java/org/dataloader/DataLoader.java
+index 125efe1..1eb358e 100644
+--- a/src/main/java/org/dataloader/DataLoader.java
++++ b/src/main/java/org/dataloader/DataLoader.java
+@@ -31,6 +31,7 @@ import java.time.Instant;
+ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.HashMap;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Optional;
+@@ -301,7 +302,7 @@ public class DataLoader<K, V extends @Nullable Object> {
+     public CompletableFuture<Map<K, V>> loadMany(Map<K, ?> keysAndContexts) {
+         nonNull(keysAndContexts);
+ 
+-        Map<K, CompletableFuture<V>> collect = new HashMap<>(keysAndContexts.size());
++        Map<K, CompletableFuture<V>> collect = new LinkedHashMap<>(keysAndContexts.size());
+         for (Map.Entry<K, ?> entry : keysAndContexts.entrySet()) {
+             K key = entry.getKey();
+             Object keyContext = entry.getValue();
+diff --git a/src/main/java/org/dataloader/impl/CompletableFutureKit.java b/src/main/java/org/dataloader/impl/CompletableFutureKit.java
+index ebc35ec..1283b81 100644
+--- a/src/main/java/org/dataloader/impl/CompletableFutureKit.java
++++ b/src/main/java/org/dataloader/impl/CompletableFutureKit.java
+@@ -2,11 +2,11 @@ package org.dataloader.impl;
+ 
+ import org.dataloader.annotations.Internal;
+ 
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.ExecutionException;
+-import java.util.stream.Collectors;
+ 
+ import static java.util.stream.Collectors.toList;
+ 
+@@ -59,12 +59,10 @@ public class CompletableFutureKit {
+ 
+     public static <K, V> CompletableFuture<Map<K, V>> allOf(Map<K, CompletableFuture<V>> cfs) {
+         return CompletableFuture.allOf(cfs.values().toArray(CompletableFuture[]::new))
+-                .thenApply(v -> cfs.entrySet().stream()
+-                        .collect(
+-                                Collectors.toMap(
+-                                        Map.Entry::getKey,
+-                                        task -> task.getValue().join())
+-                        )
+-                );
++                .thenApply(v -> {
++                    Map<K, V> valuesByKey = new LinkedHashMap<>(cfs.size());
++                    cfs.forEach((key, future) -> valuesByKey.put(key, future.join()));
++                    return valuesByKey;
++                });
+     }
+ }
+diff --git a/src/test/java/org/dataloader/DataLoaderTest.java b/src/test/java/org/dataloader/DataLoaderTest.java
+index 6ec548a..ff8811a 100644
+--- a/src/test/java/org/dataloader/DataLoaderTest.java
++++ b/src/test/java/org/dataloader/DataLoaderTest.java
+@@ -29,9 +29,12 @@ import org.dataloader.fixtures.parameterized.TestDataLoaderFactory;
+ import org.dataloader.fixtures.parameterized.TestReactiveDataLoaderFactory;
+ import org.dataloader.impl.CompletableFutureKit;
+ import org.dataloader.impl.DataLoaderAssertionException;
++import org.junit.jupiter.api.Named;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.params.ParameterizedTest;
++import org.junit.jupiter.params.provider.Arguments;
+ import org.junit.jupiter.params.provider.MethodSource;
++import reactor.core.publisher.Flux;
+ 
+ import java.util.ArrayList;
+ import java.util.Collection;
+@@ -48,6 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.Supplier;
+ import java.util.stream.Collectors;
++import java.util.stream.Stream;
+ 
+ import static java.util.Arrays.asList;
+ import static java.util.Collections.emptyList;
+@@ -213,6 +217,92 @@ public class DataLoaderTest {
+         assertThat(futureEmpty.join(), anEmptyMap());
+     }
+ 
++    @ParameterizedTest
++    @MethodSource("loadManyMapFactories")
++    public void should_Support_loadMany_map_behavior_differences(TestDataLoaderFactory factory) {
++        DataLoader<String, String> identityLoader = newLoadManyMapBehaviorLoader(factory);
++
++        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
++        keysAndContexts.put("A", null);
++        keysAndContexts.put("B", null);
++        keysAndContexts.put("C", null);
++
++        CompletableFuture<Map<String, String>> futureAll = identityLoader.loadMany(keysAndContexts);
++        identityLoader.dispatch();
++
++        await().until(futureAll::isDone);
++
++        Map<String, String> expectedValues = new LinkedHashMap<>();
++        expectedValues.put("A", "A");
++        expectedValues.put("B", allowsMissingMapEntries(factory) ? null : "B");
++        expectedValues.put("C", "C");
++
++        Map<String, String> actualValues = futureAll.join();
++        assertThat(actualValues, equalTo(expectedValues));
++        assertThat(new ArrayList<>(actualValues.keySet()), equalTo(asList("A", "B", "C")));
++    }
++
++    @ParameterizedTest
++    @MethodSource("loadManyMapFactories")
++    public void should_Preserve_input_iteration_order_when_loading_many_via_map(TestDataLoaderFactory factory) {
++        DataLoader<Integer, Integer> identityLoader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
++
++        Map<Integer, Object> keysAndContexts = new LinkedHashMap<>();
++        keysAndContexts.put(2, null);
++        keysAndContexts.put(0, null);
++        keysAndContexts.put(1, null);
++
++        CompletableFuture<Map<Integer, Integer>> futureAll = identityLoader.loadMany(keysAndContexts);
++        identityLoader.dispatch();
++
++        await().until(futureAll::isDone);
++
++        Map<Integer, Integer> expectedValues = new LinkedHashMap<>();
++        expectedValues.put(2, 2);
++        expectedValues.put(0, 0);
++        expectedValues.put(1, 1);
++
++        Map<Integer, Integer> actualValues = futureAll.join();
++        assertThat(actualValues, equalTo(expectedValues));
++        assertThat(new ArrayList<>(actualValues.keySet()), equalTo(asList(2, 0, 1)));
++    }
++
++    @ParameterizedTest
++    @MethodSource("loadManyMapFactories")
++    public void should_Complete_loadMany_map_exceptionally_when_any_child_future_fails(TestDataLoaderFactory factory) {
++        DataLoader<String, String> identityLoader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
++        IllegalStateException expectedError = new IllegalStateException("bang");
++        identityLoader.prime("B", expectedError);
++
++        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
++        keysAndContexts.put("A", null);
++        keysAndContexts.put("B", null);
++        keysAndContexts.put("C", null);
++
++        CompletableFuture<Map<String, String>> futureAll = identityLoader.loadMany(keysAndContexts);
++        assertThat(futureAll.isDone(), is(false));
++
++        identityLoader.dispatch();
++
++        await().until(futureAll::isDone);
++
++        assertThat(futureAll.isCompletedExceptionally(), is(true));
++        assertThat(cause(futureAll), equalTo(expectedError));
++    }
++
++    @ParameterizedTest
++    @MethodSource("loadManyMapFactories")
++    public void should_Return_empty_map_when_loading_many_via_map_without_keys(TestDataLoaderFactory factory) {
++        DataLoader<Integer, Integer> identityLoader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
++        CompletableFuture<Map<Integer, Integer>> futureEmpty = identityLoader.loadMany(emptyMap());
++
++        identityLoader.dispatch();
++
++        await().until(futureEmpty::isDone);
++
++        assertThat(futureEmpty.join(), anEmptyMap());
++    }
++
+     @ParameterizedTest
+     @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+     public void should_Return_zero_entries_dispatched_when_no_keys_supplied_via_list(TestDataLoaderFactory factory) {
+@@ -1341,6 +1431,47 @@ public class DataLoaderTest {
+     }
+ 
+ 
++    private static Stream<Arguments> loadManyMapFactories() {
++        return Stream.of(
++                Arguments.of(Named.of("List DataLoader", new ListDataLoaderFactory())),
++                Arguments.of(Named.of("Mapped DataLoader", new MappedDataLoaderFactory())),
++                Arguments.of(Named.of("Publisher DataLoader", new PublisherDataLoaderFactory())),
++                Arguments.of(Named.of("Mapped Publisher DataLoader", new MappedPublisherDataLoaderFactory()))
++        );
++    }
++
++    private static boolean allowsMissingMapEntries(TestDataLoaderFactory factory) {
++        return factory instanceof MappedDataLoaderFactory || factory instanceof MappedPublisherDataLoaderFactory;
++    }
++
++    private static DataLoader<String, String> newLoadManyMapBehaviorLoader(TestDataLoaderFactory factory) {
++        if (factory instanceof ListDataLoaderFactory) {
++            return DataLoaderFactory.newDataLoader(keys -> completedFuture(new ArrayList<>(keys)));
++        }
++        if (factory instanceof MappedDataLoaderFactory) {
++            return DataLoaderFactory.newMappedDataLoader(keys -> {
++                Map<String, String> values = new LinkedHashMap<>();
++                keys.stream()
++                        .filter(key -> !key.equals("B"))
++                        .forEach(key -> values.put(key, key));
++                return completedFuture(values);
++            });
++        }
++        if (factory instanceof PublisherDataLoaderFactory) {
++            return DataLoaderFactory.newPublisherDataLoader((keys, subscriber) -> Flux.fromIterable(keys).subscribe(subscriber));
++        }
++        if (factory instanceof MappedPublisherDataLoaderFactory) {
++            return DataLoaderFactory.newMappedPublisherDataLoader((keys, subscriber) -> {
++                List<Map.Entry<String, String>> values = new ArrayList<>();
++                keys.stream()
++                        .filter(key -> !key.equals("B"))
++                        .forEach(key -> values.add(Map.entry(key, key)));
++                Flux.fromIterable(values).subscribe(subscriber);
++            });
++        }
++        throw new IllegalStateException("Unexpected factory type " + factory.getClass().getName());
++    }
++
+     private static CacheKey<JsonObject> getJsonObjectCacheMapFn() {
+         return key -> key.stream()
+                 .map(entry -> entry.getKey() + ":" + entry.getValue())

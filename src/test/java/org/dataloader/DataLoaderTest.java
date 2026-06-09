@@ -29,9 +29,12 @@ import org.dataloader.fixtures.parameterized.TestDataLoaderFactory;
 import org.dataloader.fixtures.parameterized.TestReactiveDataLoaderFactory;
 import org.dataloader.impl.CompletableFutureKit;
 import org.dataloader.impl.DataLoaderAssertionException;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,6 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyList;
@@ -210,6 +214,92 @@ public class DataLoaderTest {
         });
         identityLoader.dispatch();
         await().untilAtomic(success, is(true));
+        assertThat(futureEmpty.join(), anEmptyMap());
+    }
+
+    @ParameterizedTest
+    @MethodSource("loadManyMapFactories")
+    public void should_Support_loadMany_map_behavior_differences(TestDataLoaderFactory factory) {
+        DataLoader<String, String> identityLoader = newLoadManyMapBehaviorLoader(factory);
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> futureAll = identityLoader.loadMany(keysAndContexts);
+        identityLoader.dispatch();
+
+        await().until(futureAll::isDone);
+
+        Map<String, String> expectedValues = new LinkedHashMap<>();
+        expectedValues.put("A", "A");
+        expectedValues.put("B", allowsMissingMapEntries(factory) ? null : "B");
+        expectedValues.put("C", "C");
+
+        Map<String, String> actualValues = futureAll.join();
+        assertThat(actualValues, equalTo(expectedValues));
+        assertThat(new ArrayList<>(actualValues.keySet()), equalTo(asList("A", "B", "C")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("loadManyMapFactories")
+    public void should_Preserve_input_iteration_order_when_loading_many_via_map(TestDataLoaderFactory factory) {
+        DataLoader<Integer, Integer> identityLoader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+
+        Map<Integer, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put(2, null);
+        keysAndContexts.put(0, null);
+        keysAndContexts.put(1, null);
+
+        CompletableFuture<Map<Integer, Integer>> futureAll = identityLoader.loadMany(keysAndContexts);
+        identityLoader.dispatch();
+
+        await().until(futureAll::isDone);
+
+        Map<Integer, Integer> expectedValues = new LinkedHashMap<>();
+        expectedValues.put(2, 2);
+        expectedValues.put(0, 0);
+        expectedValues.put(1, 1);
+
+        Map<Integer, Integer> actualValues = futureAll.join();
+        assertThat(actualValues, equalTo(expectedValues));
+        assertThat(new ArrayList<>(actualValues.keySet()), equalTo(asList(2, 0, 1)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("loadManyMapFactories")
+    public void should_Complete_loadMany_map_exceptionally_when_any_child_future_fails(TestDataLoaderFactory factory) {
+        DataLoader<String, String> identityLoader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+        IllegalStateException expectedError = new IllegalStateException("bang");
+        identityLoader.prime("B", expectedError);
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> futureAll = identityLoader.loadMany(keysAndContexts);
+        assertThat(futureAll.isDone(), is(false));
+
+        identityLoader.dispatch();
+
+        await().until(futureAll::isDone);
+
+        assertThat(futureAll.isCompletedExceptionally(), is(true));
+        assertThat(cause(futureAll), equalTo(expectedError));
+    }
+
+    @ParameterizedTest
+    @MethodSource("loadManyMapFactories")
+    public void should_Return_empty_map_when_loading_many_via_map_without_keys(TestDataLoaderFactory factory) {
+        DataLoader<Integer, Integer> identityLoader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+        CompletableFuture<Map<Integer, Integer>> futureEmpty = identityLoader.loadMany(emptyMap());
+
+        identityLoader.dispatch();
+
+        await().until(futureEmpty::isDone);
+
         assertThat(futureEmpty.join(), anEmptyMap());
     }
 
@@ -1340,6 +1430,47 @@ public class DataLoaderTest {
         assertThat(allResults.size(), equalTo(4));
     }
 
+
+    private static Stream<Arguments> loadManyMapFactories() {
+        return Stream.of(
+                Arguments.of(Named.of("List DataLoader", new ListDataLoaderFactory())),
+                Arguments.of(Named.of("Mapped DataLoader", new MappedDataLoaderFactory())),
+                Arguments.of(Named.of("Publisher DataLoader", new PublisherDataLoaderFactory())),
+                Arguments.of(Named.of("Mapped Publisher DataLoader", new MappedPublisherDataLoaderFactory()))
+        );
+    }
+
+    private static boolean allowsMissingMapEntries(TestDataLoaderFactory factory) {
+        return factory instanceof MappedDataLoaderFactory || factory instanceof MappedPublisherDataLoaderFactory;
+    }
+
+    private static DataLoader<String, String> newLoadManyMapBehaviorLoader(TestDataLoaderFactory factory) {
+        if (factory instanceof ListDataLoaderFactory) {
+            return DataLoaderFactory.newDataLoader(keys -> completedFuture(new ArrayList<>(keys)));
+        }
+        if (factory instanceof MappedDataLoaderFactory) {
+            return DataLoaderFactory.newMappedDataLoader(keys -> {
+                Map<String, String> values = new LinkedHashMap<>();
+                keys.stream()
+                        .filter(key -> !key.equals("B"))
+                        .forEach(key -> values.put(key, key));
+                return completedFuture(values);
+            });
+        }
+        if (factory instanceof PublisherDataLoaderFactory) {
+            return DataLoaderFactory.newPublisherDataLoader((keys, subscriber) -> Flux.fromIterable(keys).subscribe(subscriber));
+        }
+        if (factory instanceof MappedPublisherDataLoaderFactory) {
+            return DataLoaderFactory.newMappedPublisherDataLoader((keys, subscriber) -> {
+                List<Map.Entry<String, String>> values = new ArrayList<>();
+                keys.stream()
+                        .filter(key -> !key.equals("B"))
+                        .forEach(key -> values.add(Map.entry(key, key)));
+                Flux.fromIterable(values).subscribe(subscriber);
+            });
+        }
+        throw new IllegalStateException("Unexpected factory type " + factory.getClass().getName());
+    }
 
     private static CacheKey<JsonObject> getJsonObjectCacheMapFn() {
         return key -> key.stream()
