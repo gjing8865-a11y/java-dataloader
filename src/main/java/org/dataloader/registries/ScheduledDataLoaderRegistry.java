@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.dataloader.impl.Assertions.nonNull;
@@ -61,6 +62,7 @@ import static org.dataloader.impl.Assertions.nonNull;
 public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements AutoCloseable {
 
     private final Map<DataLoader<?, ?>, DispatchPredicate> dataLoaderPredicates = new ConcurrentHashMap<>();
+    private final Map<String, ScheduledFuture<?>> pendingScheduledFutures = new ConcurrentHashMap<>();
     private final DispatchPredicate dispatchPredicate;
     private final ScheduledExecutorService scheduledExecutorService;
     private final boolean defaultExecutorUsed;
@@ -85,9 +87,20 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     @Override
     public void close() {
         closed = true;
+        cancelAllPending();
         if (defaultExecutorUsed) {
             scheduledExecutorService.shutdown();
         }
+    }
+
+    private void cancelAllPending() {
+        for (Map.Entry<String, ScheduledFuture<?>> entry : pendingScheduledFutures.entrySet()) {
+            ScheduledFuture<?> future = entry.getValue();
+            if (future != null) {
+                future.cancel(false);
+            }
+        }
+        pendingScheduledFutures.clear();
     }
 
     /**
@@ -120,6 +133,9 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      */
     public ScheduledDataLoaderRegistry combine(DataLoaderRegistry registry) {
         Builder combinedBuilder = ScheduledDataLoaderRegistry.newScheduledRegistry()
+                .scheduledExecutorService(this.scheduledExecutorService)
+                .schedule(this.schedule)
+                .tickerMode(this.tickerMode)
                 .dispatchPredicate(this.dispatchPredicate);
         combinedBuilder.registerAll(this);
         combinedBuilder.registerAll(registry);
@@ -137,6 +153,10 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
         DataLoader<?, ?> dataLoader = dataLoaders.remove(key);
         if (dataLoader != null) {
             dataLoaderPredicates.remove(dataLoader);
+        }
+        ScheduledFuture<?> pending = pendingScheduledFutures.remove(key);
+        if (pending != null) {
+            pending.cancel(false);
         }
         return this;
     }
@@ -234,9 +254,25 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     }
 
     private void reschedule(String key, DataLoader<?, ?> dataLoader) {
-        if (!closed) {
-            Runnable runThis = () -> dispatchOrReschedule(key, dataLoader);
-            scheduledExecutorService.schedule(runThis, schedule.toMillis(), TimeUnit.MILLISECONDS);
+        if (closed) {
+            return;
+        }
+        if (pendingScheduledFutures.containsKey(key)) {
+            return;
+        }
+        Runnable runThis = () -> {
+            try {
+                pendingScheduledFutures.remove(key);
+                if (!closed) {
+                    dispatchOrReschedule(key, dataLoader);
+                }
+            } catch (Throwable ignored) {
+            }
+        };
+        ScheduledFuture<?> future = scheduledExecutorService.schedule(runThis, schedule.toMillis(), TimeUnit.MILLISECONDS);
+        ScheduledFuture<?> existing = pendingScheduledFutures.putIfAbsent(key, future);
+        if (existing != null) {
+            future.cancel(false);
         }
     }
 
