@@ -1,6 +1,7 @@
 package org.dataloader.instrumentation;
 
 import org.dataloader.DataLoader;
+import org.dataloader.DataLoaderFactory;
 import org.dataloader.DataLoaderOptions;
 import org.dataloader.DataLoaderRegistry;
 import org.dataloader.fixtures.TestKit;
@@ -214,8 +215,6 @@ public class DataLoaderRegistryInstrumentationTest {
                 .register("X", dl)
                 .build();
 
-        // since the data-loader changed when registered you MUST get the data loader from the registry
-        // not direct to the old one
         DataLoader<String, String> dataLoader = registry.getDataLoader("X");
         CompletableFuture<String> loadA = dataLoader.load("A");
 
@@ -224,6 +223,29 @@ public class DataLoaderRegistryInstrumentationTest {
         await().until(loadA::isDone);
         assertThat(loadA.join(), equalTo("A"));
 
+        assertThat(instrA.notLoads(), equalTo(List.of("A_beginDispatch",
+                "A_beginBatchLoader", "A_beginBatchLoader_onDispatched", "A_beginBatchLoader_onCompleted",
+                "A_beginDispatch_onDispatched", "A_beginDispatch_onCompleted")));
+    }
+
+    @Test
+    void factory_created_loader_keeps_registry_instrumentation_interaction() {
+        DataLoaderOptions options = DataLoaderOptions.newOptions().build();
+        DataLoader<String, String> loader = DataLoaderFactory.newDataLoader("factory-loader", keys -> CompletableFuture.completedFuture(keys), options);
+
+        DataLoaderRegistry registry = DataLoaderRegistry.newRegistry()
+                .instrumentation(instrA)
+                .register("factory-loader", loader)
+                .build();
+
+        DataLoader<String, String> instrumentedLoader = registry.getDataLoader("factory-loader");
+        CompletableFuture<String> loadA = instrumentedLoader.load("A");
+
+        registry.dispatchAll();
+
+        await().until(loadA::isDone);
+        assertThat(loadA.join(), equalTo("A"));
+        assertThat(instrumentedLoader.getName(), equalTo("factory-loader"));
         assertThat(instrA.notLoads(), equalTo(List.of("A_beginDispatch",
                 "A_beginBatchLoader", "A_beginBatchLoader_onDispatched", "A_beginBatchLoader_onCompleted",
                 "A_beginDispatch_onDispatched", "A_beginDispatch_onCompleted")));
