@@ -32,6 +32,7 @@ import org.dataloader.impl.DataLoaderAssertionException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -1340,6 +1341,163 @@ public class DataLoaderTest {
         assertThat(allResults.size(), equalTo(4));
     }
 
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_Support_loadMany_map_with_null_values_for_mapped_loader(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = DataLoaderFactory.newMappedDataLoader(keys -> {
+            Map<String, String> result = new HashMap<>();
+            keys.forEach(k -> {
+                if (!k.equals("B")) {
+                    result.put(k, k);
+                }
+            });
+            return completedFuture(result);
+        });
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(future::isDone);
+        Map<String, String> result = future.join();
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), equalTo(null));
+        assertThat(result.get("C"), equalTo("C"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_Preserve_input_map_order_for_loadMany_map(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("C", null);
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+
+        CompletableFuture<Map<String, String>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(future::isDone);
+        Map<String, String> result = future.join();
+        List<String> keysInOrder = new ArrayList<>(result.keySet());
+        assertThat(keysInOrder, equalTo(asList("C", "A", "B")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_Propagate_exception_from_sub_future_in_loadMany_map(TestDataLoaderFactory factory) {
+        List<Collection<String>> loadCalls = new ArrayList<>();
+        DataLoader<String, String> loader = factory.idLoaderBlowsUps(new DataLoaderOptions(), loadCalls);
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+
+        CompletableFuture<Map<String, String>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(future::isDone);
+        assertThat(future.isCompletedExceptionally(), is(true));
+    }
+
+    @Test
+    public void should_Return_empty_map_for_loadMany_map_with_empty_input() {
+        DataLoader<Integer, Integer> loader = DataLoaderFactory.newDataLoader(CompletableFuture::completedFuture);
+
+        CompletableFuture<Map<Integer, Integer>> future = loader.loadMany(emptyMap());
+        loader.dispatch();
+
+        await().until(future::isDone);
+        Map<Integer, Integer> result = future.join();
+        assertThat(result.size(), is(0));
+    }
+
+    @Test
+    public void should_Support_loadMany_map_with_null_values_for_list_loader() {
+        BatchLoader<String, String> listBatchLoader = keys -> {
+            List<String> results = new ArrayList<>();
+            for (String k : keys) {
+                if (!k.equals("B")) {
+                    results.add(k);
+                } else {
+                    results.add(null);
+                }
+            }
+            return completedFuture(results);
+        };
+        DataLoader<String, String> loader = DataLoaderFactory.newDataLoader(listBatchLoader);
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(future::isDone);
+        Map<String, String> result = future.join();
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), equalTo(null));
+        assertThat(result.get("C"), equalTo("C"));
+    }
+
+    @Test
+    public void should_Support_loadMany_map_with_publisher_loader() {
+        DataLoader<String, String> loader = DataLoaderFactory.newPublisherDataLoader((keys, subscriber) -> {
+            Flux.fromIterable(keys).subscribe(subscriber);
+        });
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("C", null);
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+
+        CompletableFuture<Map<String, String>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(future::isDone);
+        Map<String, String> result = future.join();
+        List<String> keysInOrder = new ArrayList<>(result.keySet());
+        assertThat(keysInOrder, equalTo(asList("C", "A", "B")));
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), equalTo("B"));
+        assertThat(result.get("C"), equalTo("C"));
+    }
+
+    @Test
+    public void should_Support_loadMany_map_with_null_values_for_mapped_publisher_loader() {
+        DataLoader<String, String> loader = DataLoaderFactory.newMappedPublisherDataLoader((keys, subscriber) -> {
+            Map<String, String> map = new HashMap<>();
+            keys.forEach(k -> {
+                if (!k.equals("B")) {
+                    map.put(k, k);
+                } else {
+                    map.put(k, null);
+                }
+            });
+            Flux.fromIterable(map.entrySet()).subscribe(subscriber);
+        });
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(future::isDone);
+        Map<String, String> result = future.join();
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), equalTo(null));
+        assertThat(result.get("C"), equalTo("C"));
+    }
 
     private static CacheKey<JsonObject> getJsonObjectCacheMapFn() {
         return key -> key.stream()

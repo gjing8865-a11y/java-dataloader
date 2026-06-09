@@ -2,6 +2,7 @@ package org.dataloader.impl;
 
 import org.dataloader.annotations.Internal;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -59,12 +60,12 @@ public class CompletableFutureKit {
 
     public static <K, V> CompletableFuture<Map<K, V>> allOf(Map<K, CompletableFuture<V>> cfs) {
         return CompletableFuture.allOf(cfs.values().toArray(CompletableFuture[]::new))
-                .thenApply(v -> cfs.entrySet().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        task -> task.getValue().join())
-                        )
-                );
+                .thenApply(v -> {
+                    Map<K, V> result = new LinkedHashMap<>(cfs.size());
+                    for (Map.Entry<K, CompletableFuture<V>> entry : cfs.entrySet()) {
+                        result.put(entry.getKey(), entry.getValue().join());
+                    }
+                    return result;
+                });
     }
 }
