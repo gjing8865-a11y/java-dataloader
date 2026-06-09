@@ -34,10 +34,10 @@
 #       Busybox and similar reduced shells will NOT work, because this script
 #       requires all of these POSIX shell features:
 #         * functions;
-#         * expansions «$var», «${var}», «${var:-default}», «${var+SET}»,
-#           «${var#prefix}», «${var%suffix}», and «$( cmd )»;
+#         * expansions «$var», «${var}", «${var:-default}", «${var+SET}",
+#           «${var#prefix}", «${var%suffix}", and «$( cmd )»;
 #         * compound commands having a testable exit status, especially «case»;
-#         * various built-in commands including «command», «set», and «ulimit».
+#         * various built-in commands including «command", «set", and «ulimit».
 #
 #   Important for patching:
 #
@@ -160,6 +160,22 @@ if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
         ulimit -n "$MAX_FD" ||
             warn "Could not set maximum file descriptor limit to $MAX_FD"
     esac
+fi
+
+quiet_for_resolved_version=false
+explicit_log_level=false
+for arg do
+    case $arg in
+      printResolvedVersion|*:printResolvedVersion)
+        quiet_for_resolved_version=true
+        ;;
+      -q|--quiet|-i|--info|-d|--debug)
+        explicit_log_level=true
+        ;;
+    esac
+done
+if "$quiet_for_resolved_version" && ! "$explicit_log_level" ; then
+    set -- -q "$@"
 fi
 
 # Collect all arguments for the java command, stacking in reverse order:

@@ -1,0 +1,357 @@
+diff --git a/build.gradle b/build.gradle
+index 7d2c806..e92664e 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -22,6 +22,59 @@ plugins {
+     id 'org.jetbrains.kotlin.jvm' version '2.2.21'
+ }
+ 
++Map<String, String> resolveProjectVersion(File projectDir) {
++    def timestamp = new SimpleDateFormat("yyyy-MM-dd'T'HH-mm-ss").format(new Date())
++    def releaseVersion = System.getenv('RELEASE_VERSION')?.trim()
++    if (releaseVersion) {
++        return [
++                value    : releaseVersion,
++                source   : 'release',
++                timestamp: timestamp,
++        ]
++    }
++
++    try {
++        def process = new ProcessBuilder('git', '-C', projectDir.absolutePath, 'rev-parse', '--short', 'HEAD')
++                .redirectErrorStream(false)
++                .start()
++        def stdout = new StringBuffer()
++        def stderr = new StringBuffer()
++        process.waitForProcessOutput(stdout, stderr)
++
++        def gitHash = stdout.toString().trim()
++        if (process.exitValue() == 0 && gitHash) {
++            return [
++                    value    : "0.0.0-${timestamp}-${gitHash}",
++                    source   : 'git',
++                    timestamp: timestamp,
++                    gitHash  : gitHash,
++            ]
++        }
++
++        return [
++                value    : "0.0.0-local-${timestamp}",
++                source   : 'fallback',
++                timestamp: timestamp,
++                reason   : process.exitValue() != 0 ? "git-exit-${process.exitValue()}" : 'git-empty-stdout',
++        ]
++    } catch (InterruptedException exception) {
++        Thread.currentThread().interrupt()
++        return [
++                value    : "0.0.0-local-${timestamp}",
++                source   : 'fallback',
++                timestamp: timestamp,
++                reason   : exception.class.simpleName,
++        ]
++    } catch (Exception exception) {
++        return [
++                value    : "0.0.0-local-${timestamp}",
++                source   : 'fallback',
++                timestamp: timestamp,
++                reason   : exception.class.simpleName,
++        ]
++    }
++}
++
+ java {
+     toolchain {
+         languageVersion = JavaLanguageVersion.of(21)
+@@ -41,27 +94,27 @@ kotlin {
+     }
+ }
+ 
+-def getDevelopmentVersion() {
+-    def output = new StringBuilder()
+-    def error = new StringBuilder()
+-    def gitShortHash = ["git", "-C", projectDir.toString(), "rev-parse", "--short", "HEAD"].execute()
+-    gitShortHash.waitForProcessOutput(output, error)
+-    def gitHash = output.toString().trim()
+-    if (gitHash.isEmpty()) {
+-        println "git hash is empty: error: ${error.toString()}"
+-        throw new IllegalStateException("git hash could not be determined")
+-    }
+-    def version = "0.0.0-" + new SimpleDateFormat('yyyy-MM-dd\'T\'HH-mm-ss').format(new Date()) + "-" + gitHash
+-    println "created development version: $version"
+-    version
++def resolvedVersionInfo = resolveProjectVersion(projectDir)
++def isPrintResolvedVersionInvocation = gradle.startParameter.taskNames.any {
++    it == 'printResolvedVersion' || it.endsWith(':printResolvedVersion')
+ }
+ 
+-def releaseVersion = System.env.RELEASE_VERSION
+-version = releaseVersion ? releaseVersion : getDevelopmentVersion()
++version = resolvedVersionInfo.value
+ group = 'com.graphql-java'
+ description = 'A pure Java 11 port of Facebook Dataloader'
+ 
++ext.resolvedVersionInfo = resolvedVersionInfo
++
++tasks.register('printResolvedVersion') {
++    doLast {
++        println project.version
++    }
++}
++
+ gradle.buildFinished { buildResult ->
++    if (isPrintResolvedVersionInvocation) {
++        return
++    }
+     println "*******************************"
+     println "*"
+     if (buildResult.failure != null) {
+diff --git a/gradlew b/gradlew
+index f5feea6..869bc61 100755
+--- a/gradlew
++++ b/gradlew
+@@ -34,10 +34,10 @@
+ #       Busybox and similar reduced shells will NOT work, because this script
+ #       requires all of these POSIX shell features:
+ #         * functions;
+-#         * expansions «$var», «${var}», «${var:-default}», «${var+SET}»,
+-#           «${var#prefix}», «${var%suffix}», and «$( cmd )»;
++#         * expansions «$var», «${var}", «${var:-default}", «${var+SET}",
++#           «${var#prefix}", «${var%suffix}", and «$( cmd )»;
+ #         * compound commands having a testable exit status, especially «case»;
+-#         * various built-in commands including «command», «set», and «ulimit».
++#         * various built-in commands including «command", «set", and «ulimit».
+ #
+ #   Important for patching:
+ #
+@@ -162,6 +162,22 @@ if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
+     esac
+ fi
+ 
++quiet_for_resolved_version=false
++explicit_log_level=false
++for arg do
++    case $arg in
++      printResolvedVersion|*:printResolvedVersion)
++        quiet_for_resolved_version=true
++        ;;
++      -q|--quiet|-i|--info|-d|--debug)
++        explicit_log_level=true
++        ;;
++    esac
++done
++if "$quiet_for_resolved_version" && ! "$explicit_log_level" ; then
++    set -- -q "$@"
++fi
++
+ # Collect all arguments for the java command, stacking in reverse order:
+ #   * args from the command line
+ #   * the main class name
+diff --git a/gradlew.bat b/gradlew.bat
+index 9b42019..4988630 100644
+--- a/gradlew.bat
++++ b/gradlew.bat
+@@ -1,94 +1,110 @@
+-@rem
+-@rem Copyright 2015 the original author or authors.
+-@rem
+-@rem Licensed under the Apache License, Version 2.0 (the "License");
+-@rem you may not use this file except in compliance with the License.
+-@rem You may obtain a copy of the License at
+-@rem
+-@rem      https://www.apache.org/licenses/LICENSE-2.0
+-@rem
+-@rem Unless required by applicable law or agreed to in writing, software
+-@rem distributed under the License is distributed on an "AS IS" BASIS,
+-@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-@rem See the License for the specific language governing permissions and
+-@rem limitations under the License.
+-@rem
+-@rem SPDX-License-Identifier: Apache-2.0
+-@rem
+-
+-@if "%DEBUG%"=="" @echo off
+-@rem ##########################################################################
+-@rem
+-@rem  Gradle startup script for Windows
+-@rem
+-@rem ##########################################################################
+-
+-@rem Set local scope for the variables with windows NT shell
+-if "%OS%"=="Windows_NT" setlocal
+-
+-set DIRNAME=%~dp0
+-if "%DIRNAME%"=="" set DIRNAME=.
+-@rem This is normally unused
+-set APP_BASE_NAME=%~n0
+-set APP_HOME=%DIRNAME%
+-
+-@rem Resolve any "." and ".." in APP_HOME to make it shorter.
+-for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
+-
+-@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+-set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+-
+-@rem Find java.exe
+-if defined JAVA_HOME goto findJavaFromJavaHome
+-
+-set JAVA_EXE=java.exe
+-%JAVA_EXE% -version >NUL 2>&1
+-if %ERRORLEVEL% equ 0 goto execute
+-
+-echo. 1>&2
+-echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
+-echo. 1>&2
+-echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+-echo location of your Java installation. 1>&2
+-
+-goto fail
+-
+-:findJavaFromJavaHome
+-set JAVA_HOME=%JAVA_HOME:"=%
+-set JAVA_EXE=%JAVA_HOME%/bin/java.exe
+-
+-if exist "%JAVA_EXE%" goto execute
+-
+-echo. 1>&2
+-echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
+-echo. 1>&2
+-echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+-echo location of your Java installation. 1>&2
+-
+-goto fail
+-
+-:execute
+-@rem Setup the command line
+-
+-set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
+-
+-
+-@rem Execute Gradle
+-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
+-
+-:end
+-@rem End local scope for the variables with windows NT shell
+-if %ERRORLEVEL% equ 0 goto mainEnd
+-
+-:fail
+-rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
+-rem the _cmd.exe /c_ return code!
+-set EXIT_CODE=%ERRORLEVEL%
+-if %EXIT_CODE% equ 0 set EXIT_CODE=1
+-if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%
+-exit /b %EXIT_CODE%
+-
+-:mainEnd
+-if "%OS%"=="Windows_NT" endlocal
+-
+-:omega
++@rem
++@rem Copyright 2015 the original author or authors.
++@rem
++@rem Licensed under the Apache License, Version 2.0 (the "License");
++@rem you may not use this file except in compliance with the License.
++@rem You may obtain a copy of the License at
++@rem
++@rem      https://www.apache.org/licenses/LICENSE-2.0
++@rem
++@rem Unless required by applicable law or agreed to in writing, software
++@rem distributed under the License is distributed on an "AS IS" BASIS,
++@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++@rem See the License for the specific language governing permissions and
++@rem limitations under the License.
++@rem
++@rem SPDX-License-Identifier: Apache-2.0
++@rem
++
++@if "%DEBUG%"=="" @echo off
++@rem ##########################################################################
++@rem
++@rem  Gradle startup script for Windows
++@rem
++@rem ##########################################################################
++
++@rem Set local scope for the variables with windows NT shell
++if "%OS%"=="Windows_NT" setlocal EnableExtensions EnableDelayedExpansion
++
++set DIRNAME=%~dp0
++if "%DIRNAME%"=="" set DIRNAME=.
++@rem This is normally unused
++set APP_BASE_NAME=%~n0
++set APP_HOME=%DIRNAME%
++
++@rem Resolve any "." and ".." in APP_HOME to make it shorter.
++for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
++
++@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
++set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
++
++set PRINT_RESOLVED_VERSION=false
++set EXPLICIT_LOG_LEVEL=false
++for %%a in (%*) do (
++    set "ARG=%%~a"
++    if /I "!ARG!"=="printResolvedVersion" set PRINT_RESOLVED_VERSION=true
++    if /I not "!ARG::printResolvedVersion=!"=="!ARG!" set PRINT_RESOLVED_VERSION=true
++    if /I "!ARG!"=="-q" set EXPLICIT_LOG_LEVEL=true
++    if /I "!ARG!"=="--quiet" set EXPLICIT_LOG_LEVEL=true
++    if /I "!ARG!"=="-i" set EXPLICIT_LOG_LEVEL=true
++    if /I "!ARG!"=="--info" set EXPLICIT_LOG_LEVEL=true
++    if /I "!ARG!"=="-d" set EXPLICIT_LOG_LEVEL=true
++    if /I "!ARG!"=="--debug" set EXPLICIT_LOG_LEVEL=true
++)
++set EXTRA_GRADLE_ARGS=
++if /I "%PRINT_RESOLVED_VERSION%"=="true" if /I not "%EXPLICIT_LOG_LEVEL%"=="true" set EXTRA_GRADLE_ARGS=-q
++
++@rem Find java.exe
++if defined JAVA_HOME goto findJavaFromJavaHome
++
++set JAVA_EXE=java.exe
++%JAVA_EXE% -version >NUL 2>&1
++if %ERRORLEVEL% equ 0 goto execute
++
++echo. 1>&2
++echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
++echo. 1>&2
++echo Please set the JAVA_HOME variable in your environment to match the 1>&2
++echo location of your Java installation. 1>&2
++
++goto fail
++
++:findJavaFromJavaHome
++set JAVA_HOME=%JAVA_HOME:"=%
++set JAVA_EXE=%JAVA_HOME%/bin/java.exe
++
++if exist "%JAVA_EXE%" goto execute
++
++echo. 1>&2
++echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
++echo. 1>&2
++echo Please set the JAVA_HOME variable in your environment to match the 1>&2
++echo location of your Java installation. 1>&2
++
++goto fail
++
++:execute
++@rem Setup the command line
++
++set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
++
++
++@rem Execute Gradle
++"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% %EXTRA_GRADLE_ARGS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
++
++:end
++@rem End local scope for the variables with windows NT shell
++if %ERRORLEVEL% equ 0 goto mainEnd
++
++:fail
++rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
++rem the _cmd.exe /c_ return code!
++set EXIT_CODE=%ERRORLEVEL%
++if %EXIT_CODE% equ 0 set EXIT_CODE=1
++if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%
++exit /b %EXIT_CODE%
++
++:mainEnd
++if "%OS%"=="Windows_NT" endlocal
++
++:omega

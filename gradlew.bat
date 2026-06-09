@@ -24,7 +24,7 @@
 @rem ##########################################################################
 
 @rem Set local scope for the variables with windows NT shell
-if "%OS%"=="Windows_NT" setlocal
+if "%OS%"=="Windows_NT" setlocal EnableExtensions EnableDelayedExpansion
 
 set DIRNAME=%~dp0
 if "%DIRNAME%"=="" set DIRNAME=.
@@ -37,6 +37,22 @@ for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+
+set PRINT_RESOLVED_VERSION=false
+set EXPLICIT_LOG_LEVEL=false
+for %%a in (%*) do (
+    set "ARG=%%~a"
+    if /I "!ARG!"=="printResolvedVersion" set PRINT_RESOLVED_VERSION=true
+    if /I not "!ARG::printResolvedVersion=!"=="!ARG!" set PRINT_RESOLVED_VERSION=true
+    if /I "!ARG!"=="-q" set EXPLICIT_LOG_LEVEL=true
+    if /I "!ARG!"=="--quiet" set EXPLICIT_LOG_LEVEL=true
+    if /I "!ARG!"=="-i" set EXPLICIT_LOG_LEVEL=true
+    if /I "!ARG!"=="--info" set EXPLICIT_LOG_LEVEL=true
+    if /I "!ARG!"=="-d" set EXPLICIT_LOG_LEVEL=true
+    if /I "!ARG!"=="--debug" set EXPLICIT_LOG_LEVEL=true
+)
+set EXTRA_GRADLE_ARGS=
+if /I "%PRINT_RESOLVED_VERSION%"=="true" if /I not "%EXPLICIT_LOG_LEVEL%"=="true" set EXTRA_GRADLE_ARGS=-q
 
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
@@ -74,7 +90,7 @@ set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
 
 @rem Execute Gradle
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% %EXTRA_GRADLE_ARGS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
 
 :end
 @rem End local scope for the variables with windows NT shell
