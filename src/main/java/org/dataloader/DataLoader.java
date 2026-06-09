@@ -21,6 +21,7 @@ import org.dataloader.annotations.VisibleForTesting;
 import org.dataloader.impl.CompletableFutureKit;
 import org.dataloader.stats.Statistics;
 import org.dataloader.stats.StatisticsCollector;
+import org.dataloader.stats.context.IncrementCacheHitCountStatisticsContext;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -175,7 +176,23 @@ public class DataLoader<K, V extends @Nullable Object> {
      * @return an Optional to the future of the value
      */
     public Optional<CompletableFuture<V>> getIfPresent(K key) {
-        return helper.getIfPresent(key);
+        return getIfPresent(key, null);
+    }
+
+    public Optional<CompletableFuture<V>> getIfPresent(K key, @Nullable Object keyContext) {
+        if (options.cachingEnabled()) {
+            K nonNullKey = nonNull(key);
+            Object cacheKey = getFutureCacheKey(nonNullKey, keyContext);
+            try {
+                CompletableFuture<V> cacheValue = futureCache.get(cacheKey);
+                if (cacheValue != null) {
+                    stats.incrementCacheHitCount(new IncrementCacheHitCountStatisticsContext<>(nonNullKey, keyContext));
+                    return Optional.of(cacheValue);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -194,7 +211,18 @@ public class DataLoader<K, V extends @Nullable Object> {
      * @return an Optional to the future of the value
      */
     public Optional<CompletableFuture<V>> getIfCompleted(K key) {
-        return helper.getIfCompleted(key);
+        return getIfCompleted(key, null);
+    }
+
+    public Optional<CompletableFuture<V>> getIfCompleted(K key, @Nullable Object keyContext) {
+        Optional<CompletableFuture<V>> cachedPromise = getIfPresent(key, keyContext);
+        if (cachedPromise.isPresent()) {
+            CompletableFuture<V> promise = cachedPromise.get();
+            if (promise.isDone()) {
+                return cachedPromise;
+            }
+        }
+        return Optional.empty();
     }
 
 
@@ -390,6 +418,17 @@ public class DataLoader<K, V extends @Nullable Object> {
         return this;
     }
 
+    public DataLoader<K, V> clear(K key, @Nullable Object keyContext) {
+        return clear(key, keyContext, (v, e) -> {
+        });
+    }
+
+    public DataLoader<K, V> clear(K key, @Nullable Object keyContext, BiConsumer<Void, Throwable> handler) {
+        futureCache.delete(getFutureCacheKey(nonNull(key), keyContext));
+        CompletableFuture.<Void>completedFuture(null).whenComplete(handler);
+        return this;
+    }
+
     /**
      * Clears the entire cache map of the loader.
      *
@@ -424,7 +463,11 @@ public class DataLoader<K, V extends @Nullable Object> {
      * @return the data loader for fluent coding
      */
     public DataLoader<K, V> prime(K key, V value) {
-        return prime(key, CompletableFuture.completedFuture(value));
+        return prime(key, null, value);
+    }
+
+    public DataLoader<K, V> prime(K key, @Nullable Object keyContext, V value) {
+        return prime(key, keyContext, CompletableFuture.completedFuture(value));
     }
 
     /**
@@ -436,7 +479,11 @@ public class DataLoader<K, V extends @Nullable Object> {
      * @return the data loader for fluent coding
      */
     public DataLoader<K, V> prime(K key, Exception error) {
-        return prime(key, CompletableFutureKit.failedFuture(error));
+        return prime(key, null, error);
+    }
+
+    public DataLoader<K, V> prime(K key, @Nullable Object keyContext, Exception error) {
+        return prime(key, keyContext, CompletableFutureKit.failedFuture(error));
     }
 
     /**
@@ -450,8 +497,11 @@ public class DataLoader<K, V extends @Nullable Object> {
      * @return the data loader for fluent coding
      */
     public DataLoader<K, V> prime(K key, CompletableFuture<V> value) {
-        Object cacheKey = getCacheKey(key);
-        futureCache.putIfAbsentAtomically(cacheKey, value);
+        return prime(key, null, value);
+    }
+
+    public DataLoader<K, V> prime(K key, @Nullable Object keyContext, CompletableFuture<V> value) {
+        futureCache.putIfAbsentAtomically(getFutureCacheKey(nonNull(key), keyContext), value);
         return this;
     }
 
@@ -467,6 +517,13 @@ public class DataLoader<K, V extends @Nullable Object> {
      */
     public Object getCacheKey(K key) {
         return helper.getCacheKey(key);
+    }
+
+    private Object getFutureCacheKey(K key, @Nullable Object keyContext) {
+        if (keyContext == null) {
+            return getCacheKey(key);
+        }
+        return options.cacheKeyFunction().isPresent() ? options.cacheKeyFunction().get().getKeyWithContext(key, keyContext) : key;
     }
 
     /**
