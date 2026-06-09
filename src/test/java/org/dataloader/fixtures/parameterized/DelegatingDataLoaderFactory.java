@@ -75,4 +75,9 @@ public class DelegatingDataLoaderFactory implements TestDataLoaderFactory {
     public DataLoader<String, String> idLoaderReturnsTooMany(int howManyMore, DataLoaderOptions options, ArrayList<Object> loadCalls) {
         return mkDelegateDataLoader(delegateFactory.idLoaderReturnsTooMany(howManyMore, options, loadCalls));
     }
+
+    @Override
+    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
+        return mkDelegateDataLoader(delegateFactory.missingB(options, loadCalls));
+    }
 }

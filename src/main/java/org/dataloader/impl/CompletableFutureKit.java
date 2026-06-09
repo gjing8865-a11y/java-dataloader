@@ -59,12 +59,12 @@ public class CompletableFutureKit {
 
     public static <K, V> CompletableFuture<Map<K, V>> allOf(Map<K, CompletableFuture<V>> cfs) {
         return CompletableFuture.allOf(cfs.values().toArray(CompletableFuture[]::new))
-                .thenApply(v -> cfs.entrySet().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        task -> task.getValue().join())
-                        )
-                );
+                .thenApply(v -> {
+                    Map<K, V> result = new java.util.LinkedHashMap<>(cfs.size());
+                    for (Map.Entry<K, CompletableFuture<V>> entry : cfs.entrySet()) {
+                        result.put(entry.getKey(), entry.getValue().join());
+                    }
+                    return result;
+                });
     }
 }

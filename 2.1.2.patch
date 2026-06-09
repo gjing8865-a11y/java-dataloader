@@ -1,0 +1,213 @@
+diff --git a/src/main/java/org/dataloader/impl/CompletableFutureKit.java b/src/main/java/org/dataloader/impl/CompletableFutureKit.java
+index ebc35ec..a90995c 100644
+--- a/src/main/java/org/dataloader/impl/CompletableFutureKit.java
++++ b/src/main/java/org/dataloader/impl/CompletableFutureKit.java
+@@ -59,12 +59,12 @@ public class CompletableFutureKit {
+ 
+     public static <K, V> CompletableFuture<Map<K, V>> allOf(Map<K, CompletableFuture<V>> cfs) {
+         return CompletableFuture.allOf(cfs.values().toArray(CompletableFuture[]::new))
+-                .thenApply(v -> cfs.entrySet().stream()
+-                        .collect(
+-                                Collectors.toMap(
+-                                        Map.Entry::getKey,
+-                                        task -> task.getValue().join())
+-                        )
+-                );
++                .thenApply(v -> {
++                    Map<K, V> result = new java.util.LinkedHashMap<>(cfs.size());
++                    for (Map.Entry<K, CompletableFuture<V>> entry : cfs.entrySet()) {
++                        result.put(entry.getKey(), entry.getValue().join());
++                    }
++                    return result;
++                });
+     }
+ }
+diff --git a/src/test/java/org/dataloader/DataLoaderTest.java b/src/test/java/org/dataloader/DataLoaderTest.java
+index 6ec548a..255e5d0 100644
+--- a/src/test/java/org/dataloader/DataLoaderTest.java
++++ b/src/test/java/org/dataloader/DataLoaderTest.java
+@@ -70,6 +70,7 @@ import static org.hamcrest.Matchers.empty;
+ import static org.hamcrest.Matchers.equalTo;
+ import static org.hamcrest.Matchers.instanceOf;
+ import static org.hamcrest.Matchers.is;
++import static org.hamcrest.Matchers.nullValue;
+ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertNotNull;
+@@ -147,6 +148,57 @@ public class DataLoaderTest {
+         assertThat(results, equalTo(asList("A", null, "C", null, "E", null)));
+     }
+ 
++    @ParameterizedTest
++    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
++    public void should_Support_loading_multiple_keys_in_one_call_via_map_with_nulls_and_exceptions(TestDataLoaderFactory factory) {
++        DataLoader<String, String> loader = factory.missingB(new DataLoaderOptions(), new ArrayList<>());
++
++        final Map<String, ?> keysAndContexts = new LinkedHashMap<>();
++        keysAndContexts.put("A", null);
++        keysAndContexts.put("B", null);
++        keysAndContexts.put("C", null);
++
++        CompletableFuture<Map<String, String>> futureAll = loader.loadMany(keysAndContexts);
++        loader.dispatch();
++
++        if (factory.unwrap() instanceof org.dataloader.fixtures.parameterized.ListDataLoaderFactory || 
++            factory.unwrap() instanceof org.dataloader.fixtures.parameterized.PublisherDataLoaderFactory) {
++            // These fail due to cardinality constraints
++            await().until(futureAll::isCompletedExceptionally);
++            assertThat(cause(futureAll), instanceOf(DataLoaderAssertionException.class));
++        } else {
++            // Mapped / MappedPublisher support nulls and order
++            await().until(futureAll::isDone);
++            Map<String, String> result = futureAll.join();
++            
++            // Check it contains exactly A, B, C
++            assertThat(result.size(), equalTo(3));
++            assertThat(result.get("A"), equalTo("A"));
++            assertThat(result.get("B"), nullValue());
++            assertThat(result.get("C"), equalTo("C"));
++            
++            // Check iteration order is same as input Map
++            List<String> keys = new ArrayList<>(result.keySet());
++            assertThat(keys, equalTo(asList("A", "B", "C")));
++        }
++    }
++
++    @ParameterizedTest
++    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
++    public void should_Resolve_to_exception_when_any_future_fails_in_loadMany_map(TestDataLoaderFactory factory) {
++        DataLoader<Integer, Object> loader = factory.idLoaderOddEvenExceptions(new DataLoaderOptions(), new ArrayList<>());
++
++        final Map<Integer, ?> keysAndContexts = new LinkedHashMap<>();
++        keysAndContexts.put(1, null); // will fail
++        keysAndContexts.put(2, null); // will succeed
++
++        CompletableFuture<Map<Integer, Object>> futureAll = loader.loadMany(keysAndContexts);
++        loader.dispatch();
++
++        await().until(futureAll::isCompletedExceptionally);
++        assertThat(cause(futureAll), instanceOf(IllegalStateException.class));
++    }
++
+     @ParameterizedTest
+     @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+     public void should_Support_loading_multiple_keys_in_one_call_via_list(TestDataLoaderFactory factory) {
+diff --git a/src/test/java/org/dataloader/fixtures/parameterized/DelegatingDataLoaderFactory.java b/src/test/java/org/dataloader/fixtures/parameterized/DelegatingDataLoaderFactory.java
+index 8d1f815..70563ca 100644
+--- a/src/test/java/org/dataloader/fixtures/parameterized/DelegatingDataLoaderFactory.java
++++ b/src/test/java/org/dataloader/fixtures/parameterized/DelegatingDataLoaderFactory.java
+@@ -75,4 +75,9 @@ public class DelegatingDataLoaderFactory implements TestDataLoaderFactory {
+     public DataLoader<String, String> idLoaderReturnsTooMany(int howManyMore, DataLoaderOptions options, ArrayList<Object> loadCalls) {
+         return mkDelegateDataLoader(delegateFactory.idLoaderReturnsTooMany(howManyMore, options, loadCalls));
+     }
++
++    @Override
++    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
++        return mkDelegateDataLoader(delegateFactory.missingB(options, loadCalls));
++    }
+ }
+diff --git a/src/test/java/org/dataloader/fixtures/parameterized/ListDataLoaderFactory.java b/src/test/java/org/dataloader/fixtures/parameterized/ListDataLoaderFactory.java
+index 8ec69d7..f941087 100644
+--- a/src/test/java/org/dataloader/fixtures/parameterized/ListDataLoaderFactory.java
++++ b/src/test/java/org/dataloader/fixtures/parameterized/ListDataLoaderFactory.java
+@@ -98,4 +98,18 @@ public class ListDataLoaderFactory implements TestDataLoaderFactory {
+             return completedFuture(l);
+         }, options);
+     }
++
++    @Override
++    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
++        return newDataLoader(keys -> {
++            loadCalls.add(new ArrayList<>(keys));
++            List<String> result = new ArrayList<>();
++            for (String key : keys) {
++                if (!"B".equals(key)) {
++                    result.add(key);
++                }
++            }
++            return completedFuture(result);
++        }, options);
++    }
+ }
+diff --git a/src/test/java/org/dataloader/fixtures/parameterized/MappedDataLoaderFactory.java b/src/test/java/org/dataloader/fixtures/parameterized/MappedDataLoaderFactory.java
+index f1c548e..0b87c55 100644
+--- a/src/test/java/org/dataloader/fixtures/parameterized/MappedDataLoaderFactory.java
++++ b/src/test/java/org/dataloader/fixtures/parameterized/MappedDataLoaderFactory.java
+@@ -120,4 +120,18 @@ public class MappedDataLoaderFactory implements TestDataLoaderFactory {
+             return completedFuture(collect);
+         }, options);
+     }
++
++    @Override
++    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
++        return newMappedDataLoader(keys -> {
++            loadCalls.add(new ArrayList<>(keys));
++            Map<String, String> result = new HashMap<>();
++            for (String key : keys) {
++                if (!"B".equals(key)) {
++                    result.put(key, key);
++                }
++            }
++            return completedFuture(result);
++        }, options);
++    }
+ }
+diff --git a/src/test/java/org/dataloader/fixtures/parameterized/MappedPublisherDataLoaderFactory.java b/src/test/java/org/dataloader/fixtures/parameterized/MappedPublisherDataLoaderFactory.java
+index 3a0f54e..2588a0e 100644
+--- a/src/test/java/org/dataloader/fixtures/parameterized/MappedPublisherDataLoaderFactory.java
++++ b/src/test/java/org/dataloader/fixtures/parameterized/MappedPublisherDataLoaderFactory.java
+@@ -133,4 +133,18 @@ public class MappedPublisherDataLoaderFactory implements TestDataLoaderFactory,
+                     .subscribe(subscriber);
+         }, options);
+     }
++
++    @Override
++    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
++        return newMappedPublisherDataLoader((keys, subscriber) -> {
++            loadCalls.add(new ArrayList<>(keys));
++            List<String> result = new ArrayList<>();
++            for (String key : keys) {
++                if (!"B".equals(key)) {
++                    result.add(key);
++                }
++            }
++            Flux.fromIterable(result).map(k -> Map.entry(k, k)).subscribe(subscriber);
++        }, options);
++    }
+ }
+diff --git a/src/test/java/org/dataloader/fixtures/parameterized/PublisherDataLoaderFactory.java b/src/test/java/org/dataloader/fixtures/parameterized/PublisherDataLoaderFactory.java
+index c8e8b67..49543ac 100644
+--- a/src/test/java/org/dataloader/fixtures/parameterized/PublisherDataLoaderFactory.java
++++ b/src/test/java/org/dataloader/fixtures/parameterized/PublisherDataLoaderFactory.java
+@@ -122,4 +122,18 @@ public class PublisherDataLoaderFactory implements TestDataLoaderFactory, TestRe
+                     .subscribe(subscriber);
+         }, options);
+     }
++
++    @Override
++    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
++        return newPublisherDataLoader((keys, subscriber) -> {
++            loadCalls.add(new ArrayList<>(keys));
++            List<String> result = new ArrayList<>();
++            for (String key : keys) {
++                if (!"B".equals(key)) {
++                    result.add(key);
++                }
++            }
++            Flux.fromIterable(result).subscribe(subscriber);
++        }, options);
++    }
+ }
+diff --git a/src/test/java/org/dataloader/fixtures/parameterized/TestDataLoaderFactory.java b/src/test/java/org/dataloader/fixtures/parameterized/TestDataLoaderFactory.java
+index 3c584fd..74e7bde 100644
+--- a/src/test/java/org/dataloader/fixtures/parameterized/TestDataLoaderFactory.java
++++ b/src/test/java/org/dataloader/fixtures/parameterized/TestDataLoaderFactory.java
+@@ -25,6 +25,8 @@ public interface TestDataLoaderFactory {
+ 
+     DataLoader<String, String> idLoaderReturnsTooMany(int howManyMore, DataLoaderOptions options, ArrayList<Object> loadCalls);
+ 
++    DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls);
++
+     // similar to above but batch loaders with context
+ 
+     <K> DataLoader<K, K> idLoaderWithContext(DataLoaderOptions options, List<Collection<K>> loadCalls, AtomicReference<BatchLoaderEnvironment> environmentREF);

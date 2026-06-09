@@ -25,6 +25,8 @@ public interface TestDataLoaderFactory {
 
     DataLoader<String, String> idLoaderReturnsTooMany(int howManyMore, DataLoaderOptions options, ArrayList<Object> loadCalls);
 
+    DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls);
+
     // similar to above but batch loaders with context
 
     <K> DataLoader<K, K> idLoaderWithContext(DataLoaderOptions options, List<Collection<K>> loadCalls, AtomicReference<BatchLoaderEnvironment> environmentREF);

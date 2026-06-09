@@ -70,6 +70,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -145,6 +146,57 @@ public class DataLoaderTest {
 
         assertThat(results.size(), equalTo(6));
         assertThat(results, equalTo(asList("A", null, "C", null, "E", null)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_Support_loading_multiple_keys_in_one_call_via_map_with_nulls_and_exceptions(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = factory.missingB(new DataLoaderOptions(), new ArrayList<>());
+
+        final Map<String, ?> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> futureAll = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        if (factory.unwrap() instanceof org.dataloader.fixtures.parameterized.ListDataLoaderFactory || 
+            factory.unwrap() instanceof org.dataloader.fixtures.parameterized.PublisherDataLoaderFactory) {
+            // These fail due to cardinality constraints
+            await().until(futureAll::isCompletedExceptionally);
+            assertThat(cause(futureAll), instanceOf(DataLoaderAssertionException.class));
+        } else {
+            // Mapped / MappedPublisher support nulls and order
+            await().until(futureAll::isDone);
+            Map<String, String> result = futureAll.join();
+            
+            // Check it contains exactly A, B, C
+            assertThat(result.size(), equalTo(3));
+            assertThat(result.get("A"), equalTo("A"));
+            assertThat(result.get("B"), nullValue());
+            assertThat(result.get("C"), equalTo("C"));
+            
+            // Check iteration order is same as input Map
+            List<String> keys = new ArrayList<>(result.keySet());
+            assertThat(keys, equalTo(asList("A", "B", "C")));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_Resolve_to_exception_when_any_future_fails_in_loadMany_map(TestDataLoaderFactory factory) {
+        DataLoader<Integer, Object> loader = factory.idLoaderOddEvenExceptions(new DataLoaderOptions(), new ArrayList<>());
+
+        final Map<Integer, ?> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put(1, null); // will fail
+        keysAndContexts.put(2, null); // will succeed
+
+        CompletableFuture<Map<Integer, Object>> futureAll = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+
+        await().until(futureAll::isCompletedExceptionally);
+        assertThat(cause(futureAll), instanceOf(IllegalStateException.class));
     }
 
     @ParameterizedTest

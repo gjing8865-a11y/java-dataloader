@@ -120,4 +120,18 @@ public class MappedDataLoaderFactory implements TestDataLoaderFactory {
             return completedFuture(collect);
         }, options);
     }
+
+    @Override
+    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
+        return newMappedDataLoader(keys -> {
+            loadCalls.add(new ArrayList<>(keys));
+            Map<String, String> result = new HashMap<>();
+            for (String key : keys) {
+                if (!"B".equals(key)) {
+                    result.put(key, key);
+                }
+            }
+            return completedFuture(result);
+        }, options);
+    }
 }

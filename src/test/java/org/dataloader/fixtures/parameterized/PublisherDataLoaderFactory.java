@@ -122,4 +122,18 @@ public class PublisherDataLoaderFactory implements TestDataLoaderFactory, TestRe
                     .subscribe(subscriber);
         }, options);
     }
+
+    @Override
+    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
+        return newPublisherDataLoader((keys, subscriber) -> {
+            loadCalls.add(new ArrayList<>(keys));
+            List<String> result = new ArrayList<>();
+            for (String key : keys) {
+                if (!"B".equals(key)) {
+                    result.add(key);
+                }
+            }
+            Flux.fromIterable(result).subscribe(subscriber);
+        }, options);
+    }
 }

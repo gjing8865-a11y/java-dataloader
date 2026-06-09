@@ -98,4 +98,18 @@ public class ListDataLoaderFactory implements TestDataLoaderFactory {
             return completedFuture(l);
         }, options);
     }
+
+    @Override
+    public DataLoader<String, String> missingB(DataLoaderOptions options, ArrayList<Object> loadCalls) {
+        return newDataLoader(keys -> {
+            loadCalls.add(new ArrayList<>(keys));
+            List<String> result = new ArrayList<>();
+            for (String key : keys) {
+                if (!"B".equals(key)) {
+                    result.add(key);
+                }
+            }
+            return completedFuture(result);
+        }, options);
+    }
 }
