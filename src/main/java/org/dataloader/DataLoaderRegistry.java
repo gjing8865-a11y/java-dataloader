@@ -10,9 +10,8 @@ import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,6 +43,7 @@ import static org.dataloader.impl.Assertions.assertState;
 @NullMarked
 public class DataLoaderRegistry {
     protected final Map<String, DataLoader<?, ?>> dataLoaders;
+    private final LinkedHashMap<String, Boolean> dataLoaderOrder;
     protected final @Nullable DataLoaderInstrumentation instrumentation;
 
 
@@ -57,6 +57,8 @@ public class DataLoaderRegistry {
 
     protected DataLoaderRegistry(Map<String, DataLoader<?, ?>> dataLoaders, @Nullable DataLoaderInstrumentation instrumentation) {
         this.dataLoaders = instrumentDLs(dataLoaders, instrumentation);
+        this.dataLoaderOrder = new LinkedHashMap<>();
+        dataLoaders.keySet().forEach(this::rememberKeyOrder);
         this.instrumentation = instrumentation;
     }
 
@@ -66,6 +68,50 @@ public class DataLoaderRegistry {
             dataLoaders.replaceAll((k, existingDL) -> nameAndInstrumentDL(k, registryInstrumentation, existingDL));
         }
         return dataLoaders;
+    }
+
+    private void rememberKeyOrder(String key) {
+        synchronized (dataLoaderOrder) {
+            dataLoaderOrder.putIfAbsent(key, true);
+        }
+    }
+
+    private void removeKeyOrder(String key) {
+        synchronized (dataLoaderOrder) {
+            dataLoaderOrder.remove(key);
+        }
+    }
+
+    private Map<String, DataLoader<?, ?>> orderedDataLoaders() {
+        LinkedHashMap<String, DataLoader<?, ?>> orderedDataLoaders = new LinkedHashMap<>();
+        synchronized (dataLoaderOrder) {
+            for (String key : dataLoaderOrder.keySet()) {
+                DataLoader<?, ?> dataLoader = dataLoaders.get(key);
+                if (dataLoader != null) {
+                    orderedDataLoaders.put(key, dataLoader);
+                }
+            }
+        }
+        return orderedDataLoaders;
+    }
+
+    protected void putDataLoaderInOrder(String key, DataLoader<?, ?> dataLoader) {
+        dataLoaders.put(key, dataLoader);
+        rememberKeyOrder(key);
+    }
+
+    protected DataLoader<?, ?> putDataLoader(String key, DataLoader<?, ?> dataLoader) {
+        DataLoader<?, ?> registeredDataLoader = nameAndInstrumentDL(key, instrumentation, dataLoader);
+        putDataLoaderInOrder(key, registeredDataLoader);
+        return registeredDataLoader;
+    }
+
+    protected @Nullable DataLoader<?, ?> removeDataLoader(String key) {
+        DataLoader<?, ?> removedDataLoader = dataLoaders.remove(key);
+        if (removedDataLoader != null) {
+            removeKeyOrder(key);
+        }
+        return removedDataLoader;
     }
 
     /**
@@ -84,18 +130,14 @@ public class DataLoaderRegistry {
         }
         DataLoaderOptions options = existingDL.getOptions();
         DataLoaderInstrumentation existingInstrumentation = options.getInstrumentation();
-        // if they have any instrumentations then add to it
         if (existingInstrumentation != null) {
             if (existingInstrumentation == registryInstrumentation) {
-                // nothing to change
                 return existingDL;
             }
             if (existingInstrumentation == DataLoaderInstrumentationHelper.NOOP_INSTRUMENTATION) {
-                // replace it with the registry one
                 return mkInstrumentedDataLoader(existingDL, options, registryInstrumentation);
             }
             if (existingInstrumentation instanceof ChainedDataLoaderInstrumentation) {
-                // avoids calling a chained inside a chained
                 DataLoaderInstrumentation newInstrumentation = ((ChainedDataLoaderInstrumentation) existingInstrumentation).prepend(registryInstrumentation);
                 return mkInstrumentedDataLoader(existingDL, options, newInstrumentation);
             } else {
@@ -144,7 +186,7 @@ public class DataLoaderRegistry {
      */
     public DataLoaderRegistry register(DataLoader<?, ?> dataLoader) {
         String name = Assertions.nonNull(dataLoader.getName(), () -> "The DataLoader must have a non null name");
-        dataLoaders.put(name, nameAndInstrumentDL(name, instrumentation, dataLoader));
+        putDataLoader(name, dataLoader);
         return this;
     }
 
@@ -160,7 +202,7 @@ public class DataLoaderRegistry {
      * @return this registry
      */
     public DataLoaderRegistry register(String key, DataLoader<?, ?> dataLoader) {
-        dataLoaders.put(key, nameAndInstrumentDL(key, instrumentation, dataLoader));
+        putDataLoader(key, dataLoader);
         return this;
     }
 
@@ -176,7 +218,7 @@ public class DataLoaderRegistry {
      * @return the data loader instance that was registered
      */
     public <K, V> DataLoader<K, V> registerAndGet(String key, DataLoader<?, ?> dataLoader) {
-        dataLoaders.put(key, nameAndInstrumentDL(key, instrumentation, dataLoader));
+        putDataLoader(key, dataLoader);
         return Objects.requireNonNull(getDataLoader(key));
     }
 
@@ -200,10 +242,11 @@ public class DataLoaderRegistry {
     @SuppressWarnings("unchecked")
     public <K, V> DataLoader<K, V> computeIfAbsent(final String key,
                                                    final Function<String, DataLoader<?, ?>> mappingFunction) {
-        return (DataLoader<K, V>) dataLoaders.computeIfAbsent(key, (k) -> {
-            DataLoader<?, ?> dl = mappingFunction.apply(k);
-            return nameAndInstrumentDL(key, instrumentation, dl);
-        });
+        DataLoader<K, V> dataLoader = (DataLoader<K, V>) dataLoaders.computeIfAbsent(key, (k) ->
+                nameAndInstrumentDL(key, instrumentation, mappingFunction.apply(k))
+        );
+        rememberKeyOrder(key);
+        return dataLoader;
     }
 
     /**
@@ -216,8 +259,8 @@ public class DataLoaderRegistry {
     public DataLoaderRegistry combine(DataLoaderRegistry registry) {
         DataLoaderRegistry combined = new DataLoaderRegistry();
 
-        this.dataLoaders.forEach(combined::register);
-        registry.dataLoaders.forEach(combined::register);
+        this.getDataLoadersMap().forEach(combined::register);
+        registry.getDataLoadersMap().forEach(combined::register);
         return combined;
     }
 
@@ -225,14 +268,14 @@ public class DataLoaderRegistry {
      * @return the currently registered data loaders
      */
     public List<DataLoader<?, ?>> getDataLoaders() {
-        return new ArrayList<>(dataLoaders.values());
+        return new ArrayList<>(getDataLoadersMap().values());
     }
 
     /**
      * @return the currently registered data loaders as a map
      */
     public Map<String, DataLoader<?, ?>> getDataLoadersMap() {
-        return new LinkedHashMap<>(dataLoaders);
+        return orderedDataLoaders();
     }
 
     /**
@@ -242,7 +285,7 @@ public class DataLoaderRegistry {
      * @return this registry
      */
     public DataLoaderRegistry unregister(String key) {
-        dataLoaders.remove(key);
+        removeDataLoader(key);
         return this;
     }
 
@@ -263,7 +306,7 @@ public class DataLoaderRegistry {
      * @return the keys of the data loaders in this registry
      */
     public Set<String> getKeys() {
-        return new HashSet<>(dataLoaders.keySet());
+        return new LinkedHashSet<>(getDataLoadersMap().keySet());
     }
 
     /**
@@ -281,11 +324,16 @@ public class DataLoaderRegistry {
      * @return total number of entries that were dispatched from registered {@link org.dataloader.DataLoader}s.
      */
     public int dispatchAllWithCount() {
-        int sum = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            sum += dataLoader.dispatchWithCounts().getKeysCount();
-        }
-        return sum;
+        return dispatchAllWithCounts().values().stream().mapToInt(Integer::intValue).sum();
+    }
+
+    /**
+     * @return the number of dispatched entries per registry key in stable registry order
+     */
+    public Map<String, Integer> dispatchAllWithCounts() {
+        LinkedHashMap<String, Integer> dispatchCounts = new LinkedHashMap<>();
+        getDataLoadersMap().forEach((key, dataLoader) -> dispatchCounts.put(key, dataLoader.dispatchWithCounts().getKeysCount()));
+        return dispatchCounts;
     }
 
     /**
@@ -293,11 +341,16 @@ public class DataLoaderRegistry {
      * {@link org.dataloader.DataLoader}s
      */
     public int dispatchDepth() {
-        int totalDispatchDepth = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            totalDispatchDepth += dataLoader.dispatchDepth();
-        }
-        return totalDispatchDepth;
+        return dispatchDepths().values().stream().mapToInt(Integer::intValue).sum();
+    }
+
+    /**
+     * @return the current dispatch depth per registry key in stable registry order
+     */
+    public Map<String, Integer> dispatchDepths() {
+        LinkedHashMap<String, Integer> dispatchDepths = new LinkedHashMap<>();
+        getDataLoadersMap().forEach((key, dataLoader) -> dispatchDepths.put(key, dataLoader.dispatchDepth()));
+        return dispatchDepths;
     }
 
     /**
@@ -321,7 +374,7 @@ public class DataLoaderRegistry {
 
     public static class Builder {
 
-        private final Map<String, DataLoader<?, ?>> dataLoaders = new HashMap<>();
+        private final Map<String, DataLoader<?, ?>> dataLoaders = new LinkedHashMap<>();
         private @Nullable DataLoaderInstrumentation instrumentation;
 
         /**
@@ -344,7 +397,7 @@ public class DataLoaderRegistry {
          * @return this builder for a fluent pattern
          */
         public Builder registerAll(DataLoaderRegistry otherRegistry) {
-            dataLoaders.putAll(otherRegistry.dataLoaders);
+            dataLoaders.putAll(otherRegistry.getDataLoadersMap());
             return this;
         }
 

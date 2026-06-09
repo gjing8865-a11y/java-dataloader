@@ -76,7 +76,12 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
         this.tickerMode = builder.tickerMode;
         this.closed = false;
         this.dispatchPredicate = builder.dispatchPredicate;
-        this.dataLoaderPredicates.putAll(builder.dataLoaderPredicates);
+        builder.dataLoaderPredicates.forEach((key, predicate) -> {
+            DataLoader<?, ?> dataLoader = getDataLoader(key);
+            if (dataLoader != null) {
+                this.dataLoaderPredicates.put(dataLoader, predicate);
+            }
+        });
     }
 
     /**
@@ -134,7 +139,7 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      * @return this registry
      */
     public ScheduledDataLoaderRegistry unregister(String key) {
-        DataLoader<?, ?> dataLoader = dataLoaders.remove(key);
+        DataLoader<?, ?> dataLoader = removeDataLoader(key);
         if (dataLoader != null) {
             dataLoaderPredicates.remove(dataLoader);
         }
@@ -145,7 +150,14 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      * @return a map of data loaders to specific dispatch predicates
      */
     public Map<DataLoader<?, ?>, DispatchPredicate> getDataLoaderPredicates() {
-        return new LinkedHashMap<>(dataLoaderPredicates);
+        LinkedHashMap<DataLoader<?, ?>, DispatchPredicate> predicates = new LinkedHashMap<>();
+        getDataLoadersMap().forEach((key, dataLoader) -> {
+            DispatchPredicate predicate = dataLoaderPredicates.get(dataLoader);
+            if (predicate != null) {
+                predicates.put(dataLoader, predicate);
+            }
+        });
+        return predicates;
     }
 
     /**
@@ -166,7 +178,11 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
      * @return this registry
      */
     public ScheduledDataLoaderRegistry register(String key, DataLoader<?, ?> dataLoader, DispatchPredicate dispatchPredicate) {
-        dataLoaders.put(key, dataLoader);
+        DataLoader<?, ?> previousDataLoader = getDataLoader(key);
+        if (previousDataLoader != null) {
+            dataLoaderPredicates.remove(previousDataLoader);
+        }
+        putDataLoaderInOrder(key, dataLoader);
         dataLoaderPredicates.put(dataLoader, dispatchPredicate);
         return this;
     }
@@ -177,16 +193,11 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     }
 
     @Override
-    public int dispatchAllWithCount() {
-        int sum = 0;
-        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
-            DataLoader<?, ?> dataLoader = entry.getValue();
-            String key = entry.getKey();
-            sum += dispatchOrReschedule(key, dataLoader);
-        }
-        return sum;
+    public Map<String, Integer> dispatchAllWithCounts() {
+        LinkedHashMap<String, Integer> dispatchCounts = new LinkedHashMap<>();
+        getDataLoadersMap().forEach((key, dataLoader) -> dispatchCounts.put(key, dispatchOrReschedule(key, dataLoader)));
+        return dispatchCounts;
     }
-
 
     /**
      * This will immediately dispatch the {@link DataLoader}s in the registry
@@ -265,7 +276,7 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     public static class Builder {
 
         private final Map<String, DataLoader<?, ?>> dataLoaders = new LinkedHashMap<>();
-        private final Map<DataLoader<?, ?>, DispatchPredicate> dataLoaderPredicates = new LinkedHashMap<>();
+        private final Map<String, DispatchPredicate> dataLoaderPredicates = new LinkedHashMap<>();
         private DispatchPredicate dispatchPredicate = DispatchPredicate.DISPATCH_ALWAYS;
         private @Nullable ScheduledExecutorService scheduledExecutorService;
         private boolean defaultExecutorUsed = false;
@@ -314,7 +325,7 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
          */
         public Builder register(String key, DataLoader<?, ?> dataLoader, DispatchPredicate dispatchPredicate) {
             register(key, dataLoader);
-            dataLoaderPredicates.put(dataLoader, dispatchPredicate);
+            dataLoaderPredicates.put(key, dispatchPredicate);
             return this;
         }
 
@@ -329,7 +340,12 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
             dataLoaders.putAll(otherRegistry.getDataLoadersMap());
             if (otherRegistry instanceof ScheduledDataLoaderRegistry) {
                 ScheduledDataLoaderRegistry other = (ScheduledDataLoaderRegistry) otherRegistry;
-                dataLoaderPredicates.putAll(other.dataLoaderPredicates);
+                other.getDataLoadersMap().forEach((key, dataLoader) -> {
+                    DispatchPredicate predicate = other.dataLoaderPredicates.get(dataLoader);
+                    if (predicate != null) {
+                        dataLoaderPredicates.put(key, predicate);
+                    }
+                });
             }
             return this;
         }
