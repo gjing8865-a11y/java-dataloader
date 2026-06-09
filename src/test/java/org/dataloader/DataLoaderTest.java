@@ -29,9 +29,12 @@ import org.dataloader.fixtures.parameterized.TestDataLoaderFactory;
 import org.dataloader.fixtures.parameterized.TestReactiveDataLoaderFactory;
 import org.dataloader.impl.CompletableFutureKit;
 import org.dataloader.impl.DataLoaderAssertionException;
+import org.dataloader.MappedBatchLoader;
+import org.dataloader.MappedBatchPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -41,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -58,6 +62,8 @@ import static java.util.concurrent.CompletableFuture.completedFuture;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static org.awaitility.Awaitility.await;
 import static org.dataloader.DataLoaderFactory.newDataLoader;
+import static org.dataloader.DataLoaderFactory.newMappedDataLoader;
+import static org.dataloader.DataLoaderFactory.newMappedPublisherDataLoader;
 import static org.dataloader.DataLoaderOptions.newDefaultOptions;
 import static org.dataloader.DataLoaderOptions.newOptions;
 import static org.dataloader.fixtures.TestKit.areAllDone;
@@ -70,9 +76,11 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Tests for {@link DataLoader}.
@@ -1303,6 +1311,110 @@ public class DataLoaderTest {
 
         assertThat(deepLoadCalls, equalTo(
                 asList(asList("A1", "A2"), asList("B1", "B2"))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_preserve_input_iteration_order_when_loading_via_map(TestDataLoaderFactory factory) {
+        DataLoader<Integer, Integer> loader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+
+        Map<Integer, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put(30, null);
+        keysAndContexts.put(10, null);
+        keysAndContexts.put(20, null);
+        keysAndContexts.put(5, null);
+
+        CompletableFuture<Map<Integer, Integer>> future = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+        Map<Integer, Integer> result = future.join();
+
+        assertThat(new ArrayList<>(result.keySet()), equalTo(asList(30, 10, 20, 5)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void should_return_empty_map_when_no_keys_supplied_via_map(TestDataLoaderFactory factory) {
+        DataLoader<Integer, Integer> loader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+
+        CompletableFuture<Map<Integer, Integer>> future = loader.loadMany(emptyMap());
+        loader.dispatch();
+        Map<Integer, Integer> result = future.join();
+
+        assertThat(result, is(anEmptyMap()));
+    }
+
+    @Test
+    public void mapped_loader_should_allow_missing_keys_as_null_via_map() {
+        MappedBatchLoader<String, String> mappedLoader = keys -> {
+            Map<String, String> values = new LinkedHashMap<>();
+            for (String key : keys) {
+                if (!"B".equals(key)) {
+                    values.put(key, key);
+                }
+            }
+            return completedFuture(values);
+        };
+        DataLoader<String, String> dataLoader = newMappedDataLoader(mappedLoader);
+
+        Map<String, Object> keys = new LinkedHashMap<>();
+        keys.put("A", null);
+        keys.put("B", null);
+        keys.put("C", null);
+
+        CompletableFuture<Map<String, String>> future = dataLoader.loadMany(keys);
+        dataLoader.dispatch();
+        Map<String, String> result = future.join();
+
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), is(nullValue()));
+        assertThat(result.get("C"), equalTo("C"));
+        assertThat(new ArrayList<>(result.keySet()), equalTo(asList("A", "B", "C")));
+    }
+
+    @Test
+    public void mapped_publisher_loader_should_allow_missing_keys_as_null_via_map() {
+        MappedBatchPublisher<String, String> mappedPublisher = (keys, subscriber) -> {
+            Map<String, String> values = new LinkedHashMap<>();
+            for (String key : keys) {
+                if (!"B".equals(key)) {
+                    values.put(key, key);
+                }
+            }
+            Flux.fromIterable(values.entrySet()).subscribe(subscriber);
+        };
+        DataLoader<String, String> dataLoader = newMappedPublisherDataLoader(mappedPublisher);
+
+        Map<String, Object> keys = new LinkedHashMap<>();
+        keys.put("A", null);
+        keys.put("B", null);
+        keys.put("C", null);
+
+        CompletableFuture<Map<String, String>> future = dataLoader.loadMany(keys);
+        dataLoader.dispatch();
+        Map<String, String> result = future.join();
+
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), is(nullValue()));
+        assertThat(result.get("C"), equalTo("C"));
+        assertThat(new ArrayList<>(result.keySet()), equalTo(asList("A", "B", "C")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void composite_future_should_fail_when_child_future_fails_via_map(TestDataLoaderFactory factory) {
+        DataLoader<Integer, Integer> loader = factory.idLoaderBlowsUps(new DataLoaderOptions(), new ArrayList<>());
+
+        Map<Integer, Object> keys = new LinkedHashMap<>();
+        keys.put(1, null);
+        keys.put(2, null);
+        keys.put(3, null);
+
+        CompletableFuture<Map<Integer, Integer>> future = loader.loadMany(keys);
+        loader.dispatch();
+
+        CompletionException ex = assertThrows(CompletionException.class, future::join);
+        assertThat(ex.getCause(), instanceOf(IllegalStateException.class));
+        assertThat(future.isCompletedExceptionally(), is(true));
     }
 
     @Test
