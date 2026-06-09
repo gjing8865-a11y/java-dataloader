@@ -30,7 +30,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -301,7 +301,7 @@ public class DataLoader<K, V extends @Nullable Object> {
     public CompletableFuture<Map<K, V>> loadMany(Map<K, ?> keysAndContexts) {
         nonNull(keysAndContexts);
 
-        Map<K, CompletableFuture<V>> collect = new HashMap<>(keysAndContexts.size());
+        Map<K, CompletableFuture<V>> collect = new LinkedHashMap<>(keysAndContexts.size());
         for (Map.Entry<K, ?> entry : keysAndContexts.entrySet()) {
             K key = entry.getKey();
             Object keyContext = entry.getValue();

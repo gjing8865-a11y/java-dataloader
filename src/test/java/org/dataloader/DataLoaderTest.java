@@ -1340,6 +1340,84 @@ public class DataLoaderTest {
         assertThat(allResults.size(), equalTo(4));
     }
 
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void loadMany_map_should_handle_missing_keys_as_null(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = factory.onlyReturnsNValues(2, new DataLoaderOptions(), new ArrayList<>());
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+        keysAndContexts.put("C", null);
+
+        CompletableFuture<Map<String, String>> futureAll = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+        await().atMost(Duration.FIVE_SECONDS).until(futureAll::isDone);
+
+        if (factory.unwrap() instanceof ListDataLoaderFactory || factory.unwrap() instanceof PublisherDataLoaderFactory) {
+            assertThat(futureAll.isCompletedExceptionally(), is(true));
+            assertThat(cause(futureAll), instanceOf(DataLoaderAssertionException.class));
+        } else {
+            Map<String, String> result = futureAll.join();
+            assertThat(result.get("A"), equalTo("A"));
+            assertThat(result.get("B"), equalTo("B"));
+            assertThat(result.get("C"), equalTo(null));
+            assertThat(result.containsKey("C"), is(true));
+            assertThat(result.size(), equalTo(3));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void loadMany_map_should_preserve_input_order(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("C", null);
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+
+        CompletableFuture<Map<String, String>> futureAll = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+        await().atMost(Duration.FIVE_SECONDS).until(futureAll::isDone);
+
+        Map<String, String> result = futureAll.join();
+        List<String> keys = new ArrayList<>(result.keySet());
+        assertThat(keys, equalTo(asList("C", "A", "B")));
+        assertThat(result.get("C"), equalTo("C"));
+        assertThat(result.get("A"), equalTo("A"));
+        assertThat(result.get("B"), equalTo("B"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void loadMany_map_should_propagate_exception(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = factory.idLoaderBlowsUps(new DataLoaderOptions(), new ArrayList<>());
+
+        Map<String, Object> keysAndContexts = new LinkedHashMap<>();
+        keysAndContexts.put("A", null);
+        keysAndContexts.put("B", null);
+
+        CompletableFuture<Map<String, String>> futureAll = loader.loadMany(keysAndContexts);
+        loader.dispatch();
+        await().atMost(Duration.FIVE_SECONDS).until(futureAll::isDone);
+
+        assertThat(futureAll.isCompletedExceptionally(), is(true));
+    }
+
+    @ParameterizedTest
+    @MethodSource("org.dataloader.fixtures.parameterized.TestDataLoaderFactories#get")
+    public void loadMany_map_should_return_empty_map_for_empty_input(TestDataLoaderFactory factory) {
+        DataLoader<String, String> loader = factory.idLoader(new DataLoaderOptions(), new ArrayList<>());
+
+        CompletableFuture<Map<String, String>> futureAll = loader.loadMany(emptyMap());
+        loader.dispatch();
+        await().atMost(Duration.FIVE_SECONDS).until(futureAll::isDone);
+
+        Map<String, String> result = futureAll.join();
+        assertThat(result, anEmptyMap());
+    }
+
 
     private static CacheKey<JsonObject> getJsonObjectCacheMapFn() {
         return key -> key.stream()
