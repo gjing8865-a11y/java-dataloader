@@ -1,0 +1,125 @@
+diff --git a/src/main/java/org/dataloader/DataLoaderRegistry.java b/src/main/java/org/dataloader/DataLoaderRegistry.java
+index 6bc79f6..c160065 100644
+--- a/src/main/java/org/dataloader/DataLoaderRegistry.java
++++ b/src/main/java/org/dataloader/DataLoaderRegistry.java
+@@ -282,8 +282,8 @@ public class DataLoaderRegistry {
+      */
+     public int dispatchAllWithCount() {
+         int sum = 0;
+-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
+-            sum += dataLoader.dispatchWithCounts().getKeysCount();
++        for (int count : dispatchAllWithCounts().values()) {
++            sum += count;
+         }
+         return sum;
+     }
+@@ -294,12 +294,52 @@ public class DataLoaderRegistry {
+      */
+     public int dispatchDepth() {
+         int totalDispatchDepth = 0;
+-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
+-            totalDispatchDepth += dataLoader.dispatchDepth();
++        for (int depth : dispatchDepths().values()) {
++            totalDispatchDepth += depth;
+         }
+         return totalDispatchDepth;
+     }
+ 
++    /**
++     * @return a map of each registry key to its current dispatch depth (the number of batched key loads
++     * that need to be dispatched for that {@link org.dataloader.DataLoader}). The map iteration order
++     * is the stable alphabetical order of registry keys.
++     */
++    public Map<String, Integer> dispatchDepths() {
++        List<String> keys = new ArrayList<>(dataLoaders.keySet());
++        java.util.Collections.sort(keys);
++        Map<String, Integer> result = new LinkedHashMap<>();
++        for (String key : keys) {
++            DataLoader<?, ?> dataLoader = dataLoaders.get(key);
++            if (dataLoader == null) {
++                continue;
++            }
++            result.put(key, dataLoader.dispatchDepth());
++        }
++        return result;
++    }
++
++    /**
++     * Dispatches each registered {@link org.dataloader.DataLoader} and returns a map keyed by registry
++     * key with the number of entries that were dispatched for each. The map iteration order is the
++     * stable alphabetical order of registry keys.
++     *
++     * @return a map of each registry key to the number of entries that were dispatched from it
++     */
++    public Map<String, Integer> dispatchAllWithCounts() {
++        List<String> keys = new ArrayList<>(dataLoaders.keySet());
++        java.util.Collections.sort(keys);
++        Map<String, Integer> result = new LinkedHashMap<>();
++        for (String key : keys) {
++            DataLoader<?, ?> dataLoader = dataLoaders.get(key);
++            if (dataLoader == null) {
++                continue;
++            }
++            result.put(key, dataLoader.dispatchWithCounts().getKeysCount());
++        }
++        return result;
++    }
++
+     /**
+      * @return a combined set of statistics for all data loaders in this registry presented
+      * as the sum of all their statistics
+diff --git a/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java b/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
+index 4f62378..24c4018 100644
+--- a/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
++++ b/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
+@@ -9,7 +9,9 @@ import org.jspecify.annotations.NullMarked;
+ import org.jspecify.annotations.Nullable;
+ 
+ import java.time.Duration;
++import java.util.ArrayList;
+ import java.util.LinkedHashMap;
++import java.util.List;
+ import java.util.Map;
+ import java.util.concurrent.ConcurrentHashMap;
+ import java.util.concurrent.Executors;
+@@ -179,14 +181,36 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
+     @Override
+     public int dispatchAllWithCount() {
+         int sum = 0;
+-        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
+-            DataLoader<?, ?> dataLoader = entry.getValue();
+-            String key = entry.getKey();
+-            sum += dispatchOrReschedule(key, dataLoader);
++        for (int count : dispatchAllWithCounts().values()) {
++            sum += count;
+         }
+         return sum;
+     }
+ 
++    /**
++     * {@inheritDoc}
++     * <p>
++     * For a {@link ScheduledDataLoaderRegistry} the per-loader {@link DispatchPredicate} is checked
++     * for each registered {@link DataLoader}. If the predicate (or the default registry predicate)
++     * returns false for a given loader, the entry in the returned map will be {@code 0} for that
++     * key and the loader will be rescheduled as per the usual ticker / predicate semantics. Only
++     * loaders whose predicate evaluates to true will actually be dispatched.
++     */
++    @Override
++    public Map<String, Integer> dispatchAllWithCounts() {
++        List<String> keys = new ArrayList<>(dataLoaders.keySet());
++        java.util.Collections.sort(keys);
++        Map<String, Integer> result = new LinkedHashMap<>();
++        for (String key : keys) {
++            DataLoader<?, ?> dataLoader = dataLoaders.get(key);
++            if (dataLoader == null) {
++                continue;
++            }
++            result.put(key, dispatchOrReschedule(key, dataLoader));
++        }
++        return result;
++    }
++
+ 
+     /**
+      * This will immediately dispatch the {@link DataLoader}s in the registry

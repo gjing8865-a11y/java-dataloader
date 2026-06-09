@@ -9,7 +9,9 @@ import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -179,12 +181,34 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
     @Override
     public int dispatchAllWithCount() {
         int sum = 0;
-        for (Map.Entry<String, DataLoader<?, ?>> entry : dataLoaders.entrySet()) {
-            DataLoader<?, ?> dataLoader = entry.getValue();
-            String key = entry.getKey();
-            sum += dispatchOrReschedule(key, dataLoader);
+        for (int count : dispatchAllWithCounts().values()) {
+            sum += count;
         }
         return sum;
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * For a {@link ScheduledDataLoaderRegistry} the per-loader {@link DispatchPredicate} is checked
+     * for each registered {@link DataLoader}. If the predicate (or the default registry predicate)
+     * returns false for a given loader, the entry in the returned map will be {@code 0} for that
+     * key and the loader will be rescheduled as per the usual ticker / predicate semantics. Only
+     * loaders whose predicate evaluates to true will actually be dispatched.
+     */
+    @Override
+    public Map<String, Integer> dispatchAllWithCounts() {
+        List<String> keys = new ArrayList<>(dataLoaders.keySet());
+        java.util.Collections.sort(keys);
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (String key : keys) {
+            DataLoader<?, ?> dataLoader = dataLoaders.get(key);
+            if (dataLoader == null) {
+                continue;
+            }
+            result.put(key, dispatchOrReschedule(key, dataLoader));
+        }
+        return result;
     }
 
 

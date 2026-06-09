@@ -282,8 +282,8 @@ public class DataLoaderRegistry {
      */
     public int dispatchAllWithCount() {
         int sum = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            sum += dataLoader.dispatchWithCounts().getKeysCount();
+        for (int count : dispatchAllWithCounts().values()) {
+            sum += count;
         }
         return sum;
     }
@@ -294,10 +294,50 @@ public class DataLoaderRegistry {
      */
     public int dispatchDepth() {
         int totalDispatchDepth = 0;
-        for (DataLoader<?, ?> dataLoader : getDataLoaders()) {
-            totalDispatchDepth += dataLoader.dispatchDepth();
+        for (int depth : dispatchDepths().values()) {
+            totalDispatchDepth += depth;
         }
         return totalDispatchDepth;
+    }
+
+    /**
+     * @return a map of each registry key to its current dispatch depth (the number of batched key loads
+     * that need to be dispatched for that {@link org.dataloader.DataLoader}). The map iteration order
+     * is the stable alphabetical order of registry keys.
+     */
+    public Map<String, Integer> dispatchDepths() {
+        List<String> keys = new ArrayList<>(dataLoaders.keySet());
+        java.util.Collections.sort(keys);
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (String key : keys) {
+            DataLoader<?, ?> dataLoader = dataLoaders.get(key);
+            if (dataLoader == null) {
+                continue;
+            }
+            result.put(key, dataLoader.dispatchDepth());
+        }
+        return result;
+    }
+
+    /**
+     * Dispatches each registered {@link org.dataloader.DataLoader} and returns a map keyed by registry
+     * key with the number of entries that were dispatched for each. The map iteration order is the
+     * stable alphabetical order of registry keys.
+     *
+     * @return a map of each registry key to the number of entries that were dispatched from it
+     */
+    public Map<String, Integer> dispatchAllWithCounts() {
+        List<String> keys = new ArrayList<>(dataLoaders.keySet());
+        java.util.Collections.sort(keys);
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (String key : keys) {
+            DataLoader<?, ?> dataLoader = dataLoaders.get(key);
+            if (dataLoader == null) {
+                continue;
+            }
+            result.put(key, dataLoader.dispatchWithCounts().getKeysCount());
+        }
+        return result;
     }
 
     /**
