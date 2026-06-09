@@ -1,0 +1,94 @@
+diff --git a/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java b/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
+index 4f62378..94cbed3 100644
+--- a/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
++++ b/src/main/java/org/dataloader/registries/ScheduledDataLoaderRegistry.java
+@@ -61,6 +61,7 @@ import static org.dataloader.impl.Assertions.nonNull;
+ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements AutoCloseable {
+ 
+     private final Map<DataLoader<?, ?>, DispatchPredicate> dataLoaderPredicates = new ConcurrentHashMap<>();
++    private final Map<String, java.util.concurrent.ScheduledFuture<?>> pendingTasks = new ConcurrentHashMap<>();
+     private final DispatchPredicate dispatchPredicate;
+     private final ScheduledExecutorService scheduledExecutorService;
+     private final boolean defaultExecutorUsed;
+@@ -85,6 +86,10 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
+     @Override
+     public void close() {
+         closed = true;
++        for (java.util.concurrent.ScheduledFuture<?> future : pendingTasks.values()) {
++            future.cancel(false);
++        }
++        pendingTasks.clear();
+         if (defaultExecutorUsed) {
+             scheduledExecutorService.shutdown();
+         }
+@@ -120,6 +125,8 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
+      */
+     public ScheduledDataLoaderRegistry combine(DataLoaderRegistry registry) {
+         Builder combinedBuilder = ScheduledDataLoaderRegistry.newScheduledRegistry()
++                .schedule(this.schedule)
++                .tickerMode(this.tickerMode)
+                 .dispatchPredicate(this.dispatchPredicate);
+         combinedBuilder.registerAll(this);
+         combinedBuilder.registerAll(registry);
+@@ -138,6 +145,10 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
+         if (dataLoader != null) {
+             dataLoaderPredicates.remove(dataLoader);
+         }
++        java.util.concurrent.ScheduledFuture<?> future = pendingTasks.remove(key);
++        if (future != null) {
++            future.cancel(false);
++        }
+         return this;
+     }
+ 
+@@ -234,10 +245,47 @@ public class ScheduledDataLoaderRegistry extends DataLoaderRegistry implements A
+     }
+ 
+     private void reschedule(String key, DataLoader<?, ?> dataLoader) {
+-        if (!closed) {
+-            Runnable runThis = () -> dispatchOrReschedule(key, dataLoader);
+-            scheduledExecutorService.schedule(runThis, schedule.toMillis(), TimeUnit.MILLISECONDS);
++        if (closed) {
++            return;
+         }
++        pendingTasks.compute(key, (k, existingFuture) -> {
++            if (closed) {
++                return null;
++            }
++            if (existingFuture != null && !existingFuture.isDone()) {
++                return existingFuture;
++            }
++
++            class Task implements Runnable {
++                java.util.concurrent.ScheduledFuture<?> myFuture;
++
++                @Override
++                public void run() {
++                    if (closed) return;
++                    boolean needsReschedule = false;
++                    try {
++                        boolean shouldDispatch = shouldDispatch(key, dataLoader);
++                        if (shouldDispatch) {
++                            dataLoader.dispatchWithCounts().getKeysCount();
++                        }
++                        needsReschedule = tickerMode || !shouldDispatch;
++                    } finally {
++                        if (myFuture != null) {
++                            pendingTasks.remove(key, myFuture);
++                        } else {
++                            pendingTasks.remove(key);
++                        }
++                        if (needsReschedule) {
++                            reschedule(key, dataLoader);
++                        }
++                    }
++                }
++            }
++            Task task = new Task();
++            java.util.concurrent.ScheduledFuture<?> future = scheduledExecutorService.schedule(task, schedule.toMillis(), TimeUnit.MILLISECONDS);
++            task.myFuture = future;
++            return future;
++        });
+     }
+ 
+     private int dispatchOrReschedule(String key, DataLoader<?, ?> dataLoader) {
