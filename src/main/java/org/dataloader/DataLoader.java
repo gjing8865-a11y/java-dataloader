@@ -179,6 +179,18 @@ public class DataLoader<K, V extends @Nullable Object> {
     }
 
     /**
+     * This will return an optional promise to a value previously loaded via a {@link #load(Object, Object)} call or empty if not call has been made for that key.
+     *
+     * @param key the key to check
+     * @param keyContext a context object that is specific to this key
+     *
+     * @return an Optional to the future of the value
+     */
+    public Optional<CompletableFuture<V>> getIfPresent(K key, Object keyContext) {
+        return helper.getIfPresent(key, keyContext);
+    }
+
+    /**
      * This will return an optional promise to a value previously loaded via a {@link #load(Object)} call that has in fact been completed or empty
      * if no call has been made for that key or the promise has not completed yet.
      * <p>
@@ -195,6 +207,19 @@ public class DataLoader<K, V extends @Nullable Object> {
      */
     public Optional<CompletableFuture<V>> getIfCompleted(K key) {
         return helper.getIfCompleted(key);
+    }
+
+    /**
+     * This will return an optional promise to a value previously loaded via a {@link #load(Object, Object)} call that has in fact been completed or empty
+     * if no call has been made for that key or the promise has not completed yet.
+     *
+     * @param key the key to check
+     * @param keyContext a context object that is specific to this key
+     *
+     * @return an Optional to the future of the value
+     */
+    public Optional<CompletableFuture<V>> getIfCompleted(K key, Object keyContext) {
+        return helper.getIfCompleted(key, keyContext);
     }
 
 
@@ -391,6 +416,35 @@ public class DataLoader<K, V extends @Nullable Object> {
     }
 
     /**
+     * Clears the future of the provided key and context from the cache map and the value from the value store.
+     *
+     * @param key     the key to remove
+     * @param keyContext a context object that is specific to this key
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> clear(K key, Object keyContext) {
+        return clear(key, keyContext, (v, e) -> {
+        });
+    }
+
+    /**
+     * Clears the future of the provided key and context from the cache map and the value from the value store.
+     *
+     * @param key     the key to remove
+     * @param keyContext a context object that is specific to this key
+     * @param handler a handler that will be called after the async remote clear completes
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> clear(K key, Object keyContext, BiConsumer<Void, Throwable> handler) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : helper.getCacheKeyWithContext(key, keyContext);
+        futureCache.delete(cacheKey);
+        valueCache.delete(key).whenComplete(handler);
+        return this;
+    }
+
+    /**
      * Clears the entire cache map of the loader.
      *
      * @return the data loader for fluent coding
@@ -451,6 +505,49 @@ public class DataLoader<K, V extends @Nullable Object> {
      */
     public DataLoader<K, V> prime(K key, CompletableFuture<V> value) {
         Object cacheKey = getCacheKey(key);
+        futureCache.putIfAbsentAtomically(cacheKey, value);
+        return this;
+    }
+
+    /**
+     * Primes the cache with the given key, context and value.  Note this will only prime the future cache
+     * and not the value store.
+     *
+     * @param key        the key
+     * @param keyContext a context object that is specific to this key
+     * @param value      the value
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> prime(K key, Object keyContext, V value) {
+        return prime(key, keyContext, CompletableFuture.completedFuture(value));
+    }
+
+    /**
+     * Primes the cache with the given key, context and error.
+     *
+     * @param key        the key
+     * @param keyContext a context object that is specific to this key
+     * @param error      the exception to prime instead of a value
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> prime(K key, Object keyContext, Exception error) {
+        return prime(key, keyContext, CompletableFutureKit.failedFuture(error));
+    }
+
+    /**
+     * Primes the cache with the given key, context and value.  Note this will only prime the future cache
+     * and not the value store.
+     *
+     * @param key        the key
+     * @param keyContext a context object that is specific to this key
+     * @param value      the value
+     *
+     * @return the data loader for fluent coding
+     */
+    public DataLoader<K, V> prime(K key, Object keyContext, CompletableFuture<V> value) {
+        Object cacheKey = keyContext == null ? getCacheKey(key) : helper.getCacheKeyWithContext(key, keyContext);
         futureCache.putIfAbsentAtomically(cacheKey, value);
         return this;
     }

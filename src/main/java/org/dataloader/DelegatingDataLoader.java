@@ -113,8 +113,18 @@ public class DelegatingDataLoader<K, V> extends DataLoader<K, V> {
     }
 
     @Override
+    public Optional<CompletableFuture<V>> getIfPresent(K key, Object keyContext) {
+        return delegate.getIfPresent(key, keyContext);
+    }
+
+    @Override
     public Optional<CompletableFuture<V>> getIfCompleted(K key) {
         return delegate.getIfCompleted(key);
+    }
+
+    @Override
+    public Optional<CompletableFuture<V>> getIfCompleted(K key, Object keyContext) {
+        return delegate.getIfCompleted(key, keyContext);
     }
 
     @Override
@@ -170,6 +180,18 @@ public class DelegatingDataLoader<K, V> extends DataLoader<K, V> {
     }
 
     @Override
+    public DataLoader<K, V> clear(K key, Object keyContext) {
+        delegate.clear(key, keyContext);
+        return this;
+    }
+
+    @Override
+    public DataLoader<K, V> clear(K key, Object keyContext, BiConsumer<Void, Throwable> handler) {
+        delegate.clear(key, keyContext, handler);
+        return this;
+    }
+
+    @Override
     public DataLoader<K, V> clearAll() {
         delegate.clearAll();
         return this;
@@ -196,6 +218,24 @@ public class DelegatingDataLoader<K, V> extends DataLoader<K, V> {
     @Override
     public DataLoader<K, V> prime(K key, CompletableFuture<V> value) {
         delegate.prime(key, value);
+        return this;
+    }
+
+    @Override
+    public DataLoader<K, V> prime(K key, Object keyContext, V value) {
+        delegate.prime(key, keyContext, value);
+        return this;
+    }
+
+    @Override
+    public DataLoader<K, V> prime(K key, Object keyContext, Exception error) {
+        delegate.prime(key, keyContext, error);
+        return this;
+    }
+
+    @Override
+    public DataLoader<K, V> prime(K key, Object keyContext, CompletableFuture<V> value) {
+        delegate.prime(key, keyContext, value);
         return this;
     }
 }

@@ -115,14 +115,14 @@ class DataLoaderHelper<K, V> {
         return lastDispatchTime.get();
     }
 
-    Optional<CompletableFuture<V>> getIfPresent(K key) {
+    Optional<CompletableFuture<V>> getIfPresent(K key, Object keyContext) {
         boolean cachingEnabled = loaderOptions.cachingEnabled();
         if (cachingEnabled) {
-            Object cacheKey = getCacheKey(nonNull(key));
+            Object cacheKey = keyContext == null ? getCacheKey(nonNull(key)) : getCacheKeyWithContext(nonNull(key), keyContext);
             try {
                 CompletableFuture<V> cacheValue = futureCache.get(cacheKey);
                 if (cacheValue != null) {
-                    stats.incrementCacheHitCount(new IncrementCacheHitCountStatisticsContext<>(key));
+                    stats.incrementCacheHitCount(new IncrementCacheHitCountStatisticsContext<>(key, keyContext));
                     return Optional.of(cacheValue);
                 }
             } catch (Exception ignored) {
@@ -131,8 +131,12 @@ class DataLoaderHelper<K, V> {
         return Optional.empty();
     }
 
-    Optional<CompletableFuture<V>> getIfCompleted(K key) {
-        Optional<CompletableFuture<V>> cachedPromise = getIfPresent(key);
+    Optional<CompletableFuture<V>> getIfPresent(K key) {
+        return getIfPresent(key, null);
+    }
+
+    Optional<CompletableFuture<V>> getIfCompleted(K key, Object keyContext) {
+        Optional<CompletableFuture<V>> cachedPromise = getIfPresent(key, keyContext);
         if (cachedPromise.isPresent()) {
             CompletableFuture<V> promise = cachedPromise.get();
             if (promise.isDone()) {
@@ -140,6 +144,10 @@ class DataLoaderHelper<K, V> {
             }
         }
         return Optional.empty();
+    }
+
+    Optional<CompletableFuture<V>> getIfCompleted(K key) {
+        return getIfCompleted(key, null);
     }
 
 
